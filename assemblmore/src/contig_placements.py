@@ -3,7 +3,9 @@ import pandas as pd
 from Bio import SeqIO
 
 
+import os 
 
+print(os.path.realpath(__file__))
 '''
 TODO: 
 In complex regions, primary contigs map to same regions.
