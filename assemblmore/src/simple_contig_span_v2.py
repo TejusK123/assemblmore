@@ -4,7 +4,7 @@ import re
 from typing import List
 from Bio import SeqIO
 from Bio import SeqRecord
-
+import sys
 """
 TODO:
 There is a chance that selected spanning reads are chimeric. Need to implement a check for this.
@@ -203,10 +203,14 @@ def connect_contigs(spanning_reads: List[pd.Series], contigs: SeqIO.FastaIO.Fast
 if __name__ == "__main__":
 
 
-    
+    if len(sys.argv) < 5:
+        print("Usage: python simple_contig_span_v2.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
+        sys.exit(1)
 
-    data = pd.read_csv('C_briggsae_AF16.fasta_mapped_to_ordered_and_oriented_assembly.sorted.sed.paf', delimiter='\t', header=None)
-    ordering = pd.read_csv('filtered_contigs.tsv', delimiter='\t')
+    #data = pd.read_csv(r"C:\Users\tkoti\Desktop\Genomes\gap_fill_automation\C_briggsae_AF16.fasta_mapped_to_ordered_and_oriented_assembly.sorted.sed.paf", delimiter='\t', header=None)
+    data = pd.read_csv(sys.argv[1], delimiter='\t', header=None)
+    ordering = pd.read_csv(sys.argv[2], delimiter='\t')
+    #ordering = pd.read_csv(r"C:\Users\tkoti\Desktop\Genomes\gap_fill_automation\filtered_contigs.tsv", delimiter='\t')
     telomere_reads = telomere_extension(data, ordering, expected_telomere_length=8000)
     spanning_reads = simple_contig_span(data, ordering)
 
@@ -218,8 +222,10 @@ if __name__ == "__main__":
 
 
     
-    contigs = list(SeqIO.parse('ordered_and_oriented_assembly.fasta', 'fasta'))
-    all_reads = list(SeqIO.parse(r"C:\Users\tkoti\Desktop\Genomes\raw_reads\C_briggsae_AF16.fasta", 'fasta'))
+    #contigs = list(SeqIO.parse(r"C:\Users\tkoti\Desktop\Genomes\gap_fill_automation\ordered_and_oriented_assembly.fasta", 'fasta'))
+    contigs = list(SeqIO.parse(sys.argv[3], 'fasta'))
+    #all_reads = list(SeqIO.parse(r"C:\Users\tkoti\Desktop\Genomes\raw_reads\C_briggsae_AF16.fasta", 'fasta'))
+    all_reads = list(SeqIO.parse(sys.argv[4], 'fasta'))
 
 
     #meh = (connect_contigs(spanning_reads, contigs, all_reads, ordering))

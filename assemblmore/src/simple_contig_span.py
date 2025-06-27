@@ -117,13 +117,13 @@ def remap_reads(relevant_contigs: List[SeqRecord.SeqRecord], all_reads: SeqIO.Fa
     return []
 
 if __name__ == "__main__":
-    data = pd.read_csv('C_briggsae_AF16.fasta_mapped_to_ordered_and_oriented_assembly.sorted.sed.paf', delimiter='\t', header=None)
-    ordering = pd.read_csv('filtered_contigs.tsv', delimiter='\t')
+    #data = pd.read_csv('C_briggsae_AF16.fasta_mapped_to_ordered_and_oriented_assembly.sorted.sed.paf', delimiter='\t', header=None)
+    #ordering = pd.read_csv('filtered_contigs.tsv', delimiter='\t')
     spanning_reads = simple_contig_span(data, ordering)
 
 
-    contigs = list(SeqIO.parse('ordered_and_oriented_assembly.fasta', 'fasta'))
-    all_reads = list(SeqIO.parse(r"C:\Users\tkoti\Desktop\Genomes\raw_reads\C_briggsae_AF16.fasta", 'fasta'))
+    #contigs = list(SeqIO.parse('ordered_and_oriented_assembly.fasta', 'fasta'))
+    #all_reads = list(SeqIO.parse(r"C:\Users\tkoti\Desktop\Genomes\raw_reads\C_briggsae_AF16.fasta", 'fasta'))
 
 
     meh = (connect_contigs(spanning_reads, contigs, all_reads, ordering))
