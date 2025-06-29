@@ -129,7 +129,8 @@ if len(sys.argv) < 3:
     sys.exit(1)
 
 read_stats = get_readlength_stats(sys.argv[2])
-filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=read_stats['50%'])
+threshold = read_stats['mean'] * 2
+filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
 
 def removesuffix(s, suffix):
