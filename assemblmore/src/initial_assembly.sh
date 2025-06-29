@@ -5,6 +5,12 @@ MAPPED_CONTIGS=$1
 READS=$2
 ASSEMBLY=$3
 
+if [ -z "$MAPPED_CONTIGS" ] || [ -z "$READS" ] || [ -z "$ASSEMBLY" ]; then
+    echo "Usage: $0 <mapped_contigs.paf> <reads.fastq> <assembly.fasta>"
+    exit 1
+fi
+
+
 rem_suffix="${MAPPED_CONTIGS%.sorted.paf}"
 base_name_reference="${rem_suffix##*to_}"
 base_name_reference="${base_name_reference%.fasta}"
