@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from Bio import SeqIO
-
+import networkx as nx
 
 import os 
 
@@ -28,9 +28,11 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     [f"sup_{i}" for i in range(mappings_df.shape[1] - 12)]
     )
 
-    organelle_contigs = mappings_df[mappings_df['chr'] == 'MT'] # For now, ok, in future, filter out chloroplasts and use regex to account for multiple formats
 
-    mappings_df = mappings_df[(mappings_df['chr'] != 'MT') & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P')]
+    organelle_options = ['MT', 'mitochondrion', 'chloroplast', 'plastid', 'organelle']
+    organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)] # For now, ok, in future, filter out chloroplasts and use regex to account for multiple formats
+    mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P')]
+
 
     #########################################
     prom_map = {item : {chr : 0 for chr in mappings_df['chr'].unique()} for item in mappings_df['contig'].unique()}
@@ -45,13 +47,25 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     ######################################### This really needs to be improved ^ 
 
  
+
     #####################################################
     # Calculate strand mode and max chr_map_end for each contig-chr pair and add as columns
-    strand_modes, max_chr_map_ends, min_chr_map_starts = [], [], [] #latest edit
+    strand_modes, max_chr_map_ends, min_chr_map_starts, max_matched = [], [], [], [] #latest edit
     strand_map = {'+': 1, '-': -1}  # Map strand to numerical values for mode calculation
     for item in contig_to_chr.itertuples(index=False):
 
         poi_df = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1])]
+
+        ################################ Filter out extreme mappings
+        most_contiguous = poi_df.loc[poi_df['matched_total'].idxmax()]
+        most_contiguous_start = most_contiguous['chr_map_start']
+        most_contiguous_end = most_contiguous['chr_map_end']
+        matched_len = most_contiguous['contig_length']
+        start_threshold = most_contiguous_start - matched_len
+        end_threshold = most_contiguous_end + matched_len
+        poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
+        ################################
+
 
         ############# Calculate strand mode using a weighted approach
 
@@ -71,21 +85,27 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
         #max_end = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1]) & (mappings_df['mapping_quality'] == 60)]['chr_map_end'].max()
         max_end = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_end'].max() #latest edit
         #min_start = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1]) & (mappings_df['mapping_quality'] == 60)]['chr_map_start'].min() #latest edit
-
         min_start = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_start'].min() #latest edit
         #This will also have some bugs, check when more data available
+
         if pd.isnull(max_end):
-            print(f"Warning: No valid chr_map_end found for contig {item[0]} on chr {item[1]}.")
+            print(f"Warning: No valid chr_map_end found for contig {item[0]} on chr {item[1]} at phred threshold of {phred_threshold}.")
+
         max_chr_map_ends.append(max_end if pd.notnull(max_end) else None)
         min_chr_map_starts.append(min_start if pd.notnull(min_start) else None) #latest edit
-
+        max_matched.append(poi_df['matched_total'].max() if not poi_df.empty else 0) #latest edit
 
     contig_to_chr['strand_mode'] = strand_modes
     contig_to_chr['min_chr_map_start'] = min_chr_map_starts  # latest edit
     contig_to_chr['max_chr_map_end'] = max_chr_map_ends
-    
+    contig_to_chr['max_matched'] = max_matched
 
     ####################################################
+
+
+
+    ###################################################
+
 
     output_df = contig_to_chr.sort_values(by=['chr', 'min_chr_map_start'])
 
