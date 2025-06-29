@@ -102,8 +102,33 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
 
     ####################################################
 
+    G = nx.Graph()
+    for i, item in contig_to_chr.iterrows():
+        G.add_node(item['contig'], chr=item['chr'], strand_mode=item['strand_mode'], 
+                   min_chr_map_start=item['min_chr_map_start'], max_chr_map_end=item['max_chr_map_end'],
+                   max_matched=item['max_matched'])
+    x = 0.5
 
+    for i, item in contig_to_chr.iterrows():
+        for j, other_item in contig_to_chr.iterrows():
+            if i < j and item['chr'] == other_item['chr']:
+                # Calculate overlap length
+                overlap_start = max(item['min_chr_map_start'], other_item['min_chr_map_start'])
+                overlap_end = min(item['max_chr_map_end'], other_item['max_chr_map_end'])
+                overlap = max(0, overlap_end - overlap_start + 1)
+                
+                len1 = item['max_chr_map_end'] - item['min_chr_map_start'] + 1
+                len2 = other_item['max_chr_map_end'] - other_item['min_chr_map_start'] + 1
+                # Require overlap to be greater than fraction x of either contig's mapped region
+                if (len1 > 0 and len2 > 0 and 
+                    ((overlap / len1) > x or (overlap / len2) > x)):
+                    # Add an edge if the overlap condition is met
+                    G.add_edge(item['contig'], other_item['contig'])
 
+    groups = list(nx.connected_components(G))
+
+    contig_to_group = {label: i for i, group in enumerate(groups) for label in group}
+    contig_to_chr['group'] = contig_to_chr['contig'].map(contig_to_group)
     ###################################################
 
 
