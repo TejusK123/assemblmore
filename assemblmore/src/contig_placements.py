@@ -129,6 +129,18 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
 
     contig_to_group = {label: i for i, group in enumerate(groups) for label in group}
     contig_to_chr['group'] = contig_to_chr['contig'].map(contig_to_group)
+
+    selected_contigs = []
+
+    for i, item in contig_to_chr.groupby('group'):
+        if item.shape[0] > 1:
+            selected_contigs.append(item[item['max_matched'] == item['max_matched'].max()])
+        else:
+            selected_contigs.append(item)
+
+    contig_list = [df['contig'].iloc[0] for df in selected_contigs]
+    contig_to_chr = contig_to_chr[contig_to_chr['contig'].isin(contig_list)]
+
     ###################################################
 
 
