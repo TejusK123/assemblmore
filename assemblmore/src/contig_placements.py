@@ -207,9 +207,9 @@ if len(sys.argv) < 3:
     sys.exit(1)
 
 print("Starting contig placement filtering...")
-#read_stats = get_readlength_stats(sys.argv[2])
-#threshold = read_stats['mean'] * 2
-threshold = 56028.431716322346
+read_stats = get_readlength_stats(sys.argv[2])
+threshold = read_stats['mean'] * 2
+#threshold = 56028.431716322346
 #threshold = 57070.18499123945
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
