@@ -14,12 +14,17 @@ Implement logic to handle these cases.
 '''
 
 def get_readlength_stats(reads_file):
+    print(f"Reading read lengths from: {reads_file}")
     read_lengths = (len(record.seq) for record in SeqIO.parse(reads_file, "fasta"))
-    return pd.Series(read_lengths).describe()
+    stats = pd.Series(read_lengths).describe()
+    print(f"Read length stats:\n{stats}")
+    return stats
 
 
 
 def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred_threshold=40):
+    print(f"Loading mapped contigs from: {mapped_contigs_path}")
+    print(f"Minimum contig length: {min_contig_length}, Phred threshold: {phred_threshold}")
 
     mappings_df = pd.read_csv(mapped_contigs_path, delimiter = '\t', header = None)
     mappings_df.columns = (
@@ -27,12 +32,13 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     'strand', 'chr', 'chr_length', 'chr_map_start', 'chr_map_end', 'matched_bases', 'matched_total', 'mapping_quality'] + 
     [f"sup_{i}" for i in range(mappings_df.shape[1] - 12)]
     )
-
+    print(f"Loaded {len(mappings_df)} mappings.")
 
     organelle_options = ['MT', 'mitochondrion', 'chloroplast', 'plastid', 'organelle']
-    organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)] # For now, ok, in future, filter out chloroplasts and use regex to account for multiple formats
+    organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)]
+    print(f"Found {len(organelle_contigs)} organelle contigs.")
     mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P')]
-
+    print(f"Filtered to {len(mappings_df)} mappings after removing organelles and short contigs.")
 
     #########################################
     prom_map = {item : {chr : 0 for chr in mappings_df['chr'].unique()} for item in mappings_df['contig'].unique()}
@@ -40,10 +46,12 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
         for chr, count in value.items():
             prom_map[key][chr] += int(mappings_df[(mappings_df['contig'] == key) & (mappings_df['chr'] == chr)]['matched_total'].sum())
 
+    print("Built prom_map for contig-chr matched totals.")
 
     contig_to_chr = pd.DataFrame(sorted([(item, next(key for key,value in prom_map[item].items() 
                                     if value == max(prom_map[item].values()))) for item in prom_map.keys()], 
                                     key = lambda x: x[1]), columns=['contig', 'chr'])
+    print(f"Assigned {len(contig_to_chr)} contigs to chromosomes.")
     ######################################### This really needs to be improved ^ 
 
  
@@ -53,39 +61,46 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     strand_modes, max_chr_map_ends, min_chr_map_starts, max_matched = [], [], [], [] #latest edit
     strand_map = {'+': 1, '-': -1}  # Map strand to numerical values for mode calculation
     for item in contig_to_chr.itertuples(index=False):
-
+        print(f"Processing contig {item[0]} on chr {item[1]}")
         poi_df = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1])]
 
         ################################ Filter out extreme mappings
-        most_contiguous = poi_df.loc[poi_df['matched_total'].idxmax()]
-        most_contiguous_start = most_contiguous['chr_map_start']
-        most_contiguous_end = most_contiguous['chr_map_end']
-        matched_len = most_contiguous['contig_length']
-        start_threshold = most_contiguous_start - matched_len
-        end_threshold = most_contiguous_end + matched_len
-        poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
+        if poi_df.empty:
+            print(f"Warning: No mappings found for contig {item[0]} on chr {item[1]}")
+            most_contiguous_start = most_contiguous_end = matched_len = start_threshold = end_threshold = None
+        else:
+            most_contiguous = poi_df.loc[poi_df['matched_total'].idxmax()]
+            most_contiguous_start = most_contiguous['chr_map_start']
+            most_contiguous_end = most_contiguous['chr_map_end']
+            matched_len = most_contiguous['contig_length']
+            valid_extension = most_contiguous['contig_length'] - matched_len
+            start_threshold = most_contiguous_start - valid_extension
+            end_threshold = most_contiguous_end + valid_extension
+            poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
         ################################
 
-
         ############# Calculate strand mode using a weighted approach
-
-        matched_total = poi_df['matched_total'].sum()
-        length_ratio_series = (poi_df['contig_map_end'] - poi_df['contig_map_start']) / matched_total
-        criterion = (poi_df['strand'].apply(lambda x: strand_map[x] if x in strand_map else np.nan) @ length_ratio_series)
-        if criterion >= 0:
-            strand_modes.append('+')
+        if not poi_df.empty:
+            matched_total = poi_df['matched_total'].sum()
+            length_ratio_series = (poi_df['contig_map_end'] - poi_df['contig_map_start']) / matched_total
+            criterion = (poi_df['strand'].apply(lambda x: strand_map[x] if x in strand_map else np.nan) @ length_ratio_series)
+            if criterion >= 0:
+                strand_modes.append('+')
+            else:
+                strand_modes.append('-')
         else:
-            strand_modes.append('-')
+            strand_modes.append('N/A')
 
         #mode_series = poi_df['strand'].mode() <- old method, but does not work well for complex regions with multiple mappings
         #############
 
-        
-
         #max_end = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1]) & (mappings_df['mapping_quality'] == 60)]['chr_map_end'].max()
-        max_end = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_end'].max() #latest edit
-        #min_start = mappings_df[(mappings_df['contig'] == item[0]) & (mappings_df['chr'] == item[1]) & (mappings_df['mapping_quality'] == 60)]['chr_map_start'].min() #latest edit
-        min_start = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_start'].min() #latest edit
+        if not poi_df.empty:
+            max_end = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_end'].max() #latest edit
+            min_start = poi_df[poi_df['mapping_quality'] >= phred_threshold]['chr_map_start'].min() #latest edit
+        else:
+            max_end = None
+            min_start = None
         #This will also have some bugs, check when more data available
 
         if pd.isnull(max_end):
@@ -100,6 +115,8 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     contig_to_chr['max_chr_map_end'] = max_chr_map_ends
     contig_to_chr['max_matched'] = max_matched
 
+    print("Calculated strand modes and mapping coordinates for contigs.")
+
     ####################################################
 
     G = nx.Graph()
@@ -109,6 +126,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
                    max_matched=item['max_matched'])
     x = 0.5
 
+    print("Building overlap graph...")
     for i, item in contig_to_chr.iterrows():
         for j, other_item in contig_to_chr.iterrows():
             if i < j and item['chr'] == other_item['chr']:
@@ -120,12 +138,16 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
                 len1 = item['max_chr_map_end'] - item['min_chr_map_start'] + 1
                 len2 = other_item['max_chr_map_end'] - other_item['min_chr_map_start'] + 1
                 # Require overlap to be greater than fraction x of either contig's mapped region
-                if (len1 > 0 and len2 > 0 and 
+                
+                if (len1 > 0 and len2 > 0 and
                     ((overlap / len1) > x or (overlap / len2) > x)):
                     # Add an edge if the overlap condition is met
+                    print(f"{item['contig']}-{other_item['contig']} ends {item['max_chr_map_end']} {other_item['max_chr_map_end']} starts {item['min_chr_map_start']} {other_item['min_chr_map_start']}")
+                    print(f"Adding edge between {item['contig']} and {other_item['contig']} (overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
                     G.add_edge(item['contig'], other_item['contig'])
 
     groups = list(nx.connected_components(G))
+    print(f"Identified {len(groups)} connected groups.")
 
     contig_to_group = {label: i for i, group in enumerate(groups) for label in group}
     contig_to_chr['group'] = contig_to_chr['contig'].map(contig_to_group)
@@ -133,30 +155,41 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     selected_contigs = []
 
     for i, item in contig_to_chr.groupby('group'):
+        print(f"Selecting contigs for group {i} (size {item.shape[0]})")
         if item.shape[0] > 1:
-            selected_contigs.append(item[item['max_matched'] == item['max_matched'].max()])
+            selected = item[item['max_matched'] == item['max_matched'].max()]
+            print(f"Selected contig(s) with max matched: {selected['contig'].tolist()}")
+            selected_contigs.append(selected)
         else:
             selected_contigs.append(item)
 
     contig_list = [df['contig'].iloc[0] for df in selected_contigs]
+    print(f"Final selected contigs: {contig_list}")
     contig_to_chr = contig_to_chr[contig_to_chr['contig'].isin(contig_list)]
 
     ###################################################
 
-
     output_df = contig_to_chr.sort_values(by=['chr', 'min_chr_map_start'])
+    print("Sorted output dataframe.")
 
     # Optionally add organelle contigs if present
     if not organelle_contigs.empty:
+        print("Adding organelle contigs to output.")
         print(organelle_contigs)
+        print(len(organelle_contigs['contig'].unique()), "unique organelle contigs found.")
+        print(len(organelle_contigs['chr'].unique()), "unique organelle chromosomes found.")
+        organelle_contig_chr = organelle_contigs.drop_duplicates(subset=['contig'])[['contig', 'chr']]
         organelle_df = pd.DataFrame({
-            'contig': organelle_contigs['contig'].unique(),
-            'chr': organelle_contigs['chr'].unique(),
-            'strand_mode': ['N/A'] * len(organelle_contigs['contig'].unique()),
-            'max_chr_map_end': ['N/A'] * len(organelle_contigs['contig'].unique())
+            'contig': organelle_contig_chr['contig'].values,
+            'chr': organelle_contig_chr['chr'].values,
+            'strand_mode': ['N/A'] * len(organelle_contig_chr),
+            'min_chr_map_start': ['N/A'] * len(organelle_contig_chr),
+            'max_chr_map_end': ['N/A'] * len(organelle_contig_chr),
+            'max_matched': ['N/A'] * len(organelle_contig_chr),
         })
         output_df = pd.concat([output_df, organelle_df], ignore_index=True)
     #^ This will fail if a contig is mapped to multiple organelles, but for now, this is ok
+    print("Returning output dataframe.")
     return output_df
 
 
@@ -166,8 +199,11 @@ if len(sys.argv) < 3:
     print("Usage: python contig_placements.py <mapped_contigs_path> <reads_file>")
     sys.exit(1)
 
+print("Starting contig placement filtering...")
 read_stats = get_readlength_stats(sys.argv[2])
 threshold = read_stats['mean'] * 2
+#threshold = 56028.431716322346
+print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
 
@@ -188,6 +224,7 @@ else:
 for ext in [".fasta", ".fa", ".fna"]:
     base_name_reference = removesuffix(base_name_reference, ext)
 
+print(f"Base name for output: {base_name_reference}")
 
 filtered_data.to_csv(f'filtered_by_{base_name_reference}_contigs.tsv', sep='\t', index=False)
 print(f"Filtered contigs saved to 'filtered_by_{base_name_reference}_contigs.tsv'")
