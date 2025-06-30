@@ -22,7 +22,7 @@ def get_readlength_stats(reads_file):
 
 
 
-def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred_threshold=40):
+def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred_threshold=40, overlap_fraction=0.4):
     print(f"Loading mapped contigs from: {mapped_contigs_path}")
     print(f"Minimum contig length: {min_contig_length}, Phred threshold: {phred_threshold}")
 
@@ -73,9 +73,12 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
             most_contiguous_start = most_contiguous['chr_map_start']
             most_contiguous_end = most_contiguous['chr_map_end']
             matched_len = most_contiguous['contig_length']
-            valid_extension = most_contiguous['contig_length'] - matched_len
-            start_threshold = most_contiguous_start - valid_extension
-            end_threshold = most_contiguous_end + valid_extension
+            valid_extension = matched_len
+            #valid_extension = most_contiguous['contig_length'] - matched_len
+            start_threshold = most_contiguous_start - most_contiguous['contig_map_start']
+            #start_threshold = most_contiguous_start - valid_extension
+            end_threshold = most_contiguous_end + most_contiguous['contig_length'] - most_contiguous['contig_map_end']
+            #end_threshold = most_contiguous_end + valid_extension
             poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
         ################################
 
@@ -124,7 +127,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
         G.add_node(item['contig'], chr=item['chr'], strand_mode=item['strand_mode'], 
                    min_chr_map_start=item['min_chr_map_start'], max_chr_map_end=item['max_chr_map_end'],
                    max_matched=item['max_matched'])
-    x = 0.5
+    
 
     print("Building overlap graph...")
     for i, item in contig_to_chr.iterrows():
@@ -137,12 +140,12 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
                 
                 len1 = item['max_chr_map_end'] - item['min_chr_map_start'] + 1
                 len2 = other_item['max_chr_map_end'] - other_item['min_chr_map_start'] + 1
-                # Require overlap to be greater than fraction x of either contig's mapped region
-                
+                # Require overlap to be greater than fraction overlap_fraction of either contig's mapped region
+                print(f"{item['contig']}-{other_item['contig']} {(item['min_chr_map_start'], item['max_chr_map_end'])} {(other_item['min_chr_map_start'], other_item['max_chr_map_end'])}\n(overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
                 if (len1 > 0 and len2 > 0 and
-                    ((overlap / len1) > x or (overlap / len2) > x)):
+                    ((overlap / len1) > overlap_fraction or (overlap / len2) > overlap_fraction)):
                     # Add an edge if the overlap condition is met
-                    print(f"{item['contig']}-{other_item['contig']} ends {item['max_chr_map_end']} {other_item['max_chr_map_end']} starts {item['min_chr_map_start']} {other_item['min_chr_map_start']}")
+                    #print(f"{item['contig']}-{other_item['contig']} ends {item['max_chr_map_end']} {other_item['max_chr_map_end']} starts {item['min_chr_map_start']} {other_item['min_chr_map_start']}")
                     print(f"Adding edge between {item['contig']} and {other_item['contig']} (overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
                     G.add_edge(item['contig'], other_item['contig'])
 
@@ -200,9 +203,10 @@ if len(sys.argv) < 3:
     sys.exit(1)
 
 print("Starting contig placement filtering...")
-read_stats = get_readlength_stats(sys.argv[2])
-threshold = read_stats['mean'] * 2
+#read_stats = get_readlength_stats(sys.argv[2])
+#threshold = read_stats['mean'] * 2
 #threshold = 56028.431716322346
+threshold = 57070.18499123945
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
