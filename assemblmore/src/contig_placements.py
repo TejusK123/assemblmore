@@ -148,6 +148,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
 
     # Optionally add organelle contigs if present
     if not organelle_contigs.empty:
+        print(organelle_contigs)
         organelle_df = pd.DataFrame({
             'contig': organelle_contigs['contig'].unique(),
             'chr': organelle_contigs['chr'].unique(),
