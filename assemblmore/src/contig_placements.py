@@ -72,13 +72,17 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
             most_contiguous = poi_df.loc[poi_df['matched_total'].idxmax()]
             most_contiguous_start = most_contiguous['chr_map_start']
             most_contiguous_end = most_contiguous['chr_map_end']
-            matched_len = most_contiguous['contig_length']
-            valid_extension = matched_len
-            #valid_extension = most_contiguous['contig_length'] - matched_len
+            
             start_threshold = most_contiguous_start - most_contiguous['contig_map_start']
+            end_threshold = most_contiguous_end + (most_contiguous['contig_length'] - most_contiguous['contig_map_end']) # <- This most accurate way to do this.
+
+            #matched_len = most_contiguous['contig_length']
+            #valid_extension = matched_len
+            #valid_extension = most_contiguous['contig_length'] - matched_len
             #start_threshold = most_contiguous_start - valid_extension
-            end_threshold = most_contiguous_end + most_contiguous['contig_length'] - most_contiguous['contig_map_end']
             #end_threshold = most_contiguous_end + valid_extension
+            
+            
             poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
         ################################
 
@@ -205,8 +209,8 @@ if len(sys.argv) < 3:
 print("Starting contig placement filtering...")
 #read_stats = get_readlength_stats(sys.argv[2])
 #threshold = read_stats['mean'] * 2
-#threshold = 56028.431716322346
-threshold = 57070.18499123945
+threshold = 56028.431716322346
+#threshold = 57070.18499123945
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
