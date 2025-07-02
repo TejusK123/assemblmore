@@ -133,6 +133,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
                    max_matched=item['max_matched'])
     
 
+    #Maybe more fine grained overlap calculation base off individual mappings.
     print("Building overlap graph...")
     for i, item in contig_to_chr.iterrows():
         for j, other_item in contig_to_chr.iterrows():
