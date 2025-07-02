@@ -183,7 +183,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     # Optionally add organelle contigs if present
     if not organelle_contigs.empty:
         print("Adding organelle contigs to output.")
-        print(organelle_contigs)
+        #print(organelle_contigs)
         print(len(organelle_contigs['contig'].unique()), "unique organelle contigs found.")
         print(len(organelle_contigs['chr'].unique()), "unique organelle chromosomes found.")
         organelle_contig_chr = organelle_contigs.drop_duplicates(subset=['contig'])[['contig', 'chr']]
@@ -194,7 +194,10 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
             'min_chr_map_start': ['N/A'] * len(organelle_contig_chr),
             'max_chr_map_end': ['N/A'] * len(organelle_contig_chr),
             'max_matched': ['N/A'] * len(organelle_contig_chr),
+            'group': ['organelle'] * len(organelle_contig_chr)
         })
+
+        organelle_df = organelle_df[~organelle_df['contig'].isin(output_df['contig'].unique())]  # Ensure only organelle contigs in output
         output_df = pd.concat([output_df, organelle_df], ignore_index=True)
     #^ This will fail if a contig is mapped to multiple organelles, but for now, this is ok
     print("Returning output dataframe.")
