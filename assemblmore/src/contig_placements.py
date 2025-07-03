@@ -22,7 +22,7 @@ def get_readlength_stats(reads_file):
 
 
 
-def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred_threshold=40, overlap_fraction=0.4):
+def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phred_threshold=40, overlap_fraction=0.25, matched_base_threshold=15000):
     print(f"Loading mapped contigs from: {mapped_contigs_path}")
     print(f"Minimum contig length: {min_contig_length}, Phred threshold: {phred_threshold}")
 
@@ -37,7 +37,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     organelle_options = ['MT', 'mitochondrion', 'chloroplast', 'plastid', 'organelle']
     organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)]
     print(f"Found {len(organelle_contigs)} organelle contigs.")
-    mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P')]
+    mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P') & (mappings_df['matched_total'] >= matched_base_threshold)]
     print(f"Filtered to {len(mappings_df)} mappings after removing organelles and short contigs.")
 
     #########################################
@@ -146,7 +146,9 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
                 len1 = item['max_chr_map_end'] - item['min_chr_map_start'] + 1
                 len2 = other_item['max_chr_map_end'] - other_item['min_chr_map_start'] + 1
                 # Require overlap to be greater than fraction overlap_fraction of either contig's mapped region
-                print(f"{item['contig']}-{other_item['contig']} {(item['min_chr_map_start'], item['max_chr_map_end'])} {(other_item['min_chr_map_start'], other_item['max_chr_map_end'])}\n(overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
+                if ((overlap / len1) > overlap_fraction or (overlap / len2) > 0.1):
+
+                    print(f"{item['contig']}-{other_item['contig']} {(item['min_chr_map_start'], item['max_chr_map_end'])} {(other_item['min_chr_map_start'], other_item['max_chr_map_end'])}\n(overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
                 if (len1 > 0 and len2 > 0 and
                     ((overlap / len1) > overlap_fraction or (overlap / len2) > overlap_fraction)):
                     # Add an edge if the overlap condition is met
@@ -165,7 +167,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=1000, phred
     for i, item in contig_to_chr.groupby('group'):
         print(f"Selecting contigs for group {i} (size {item.shape[0]})")
         if item.shape[0] > 1:
-            selected = item[item['max_matched'] == item['max_matched'].max()]
+            selected = item[item['max_matched'] == item['max_matched'].max()] #Possibly change this metric to ratio of clippings to length of contig and choose minimum.
             print(f"Selected contig(s) with max matched: {selected['contig'].tolist()}")
             selected_contigs.append(selected)
         else:
@@ -211,10 +213,11 @@ if len(sys.argv) < 3:
     sys.exit(1)
 
 print("Starting contig placement filtering...")
-read_stats = get_readlength_stats(sys.argv[2])
+#read_stats = get_readlength_stats(sys.argv[2])
 threshold = read_stats['mean'] * 2
 #threshold = 56028.431716322346
 #threshold = 57070.18499123945
+#threshold = 100000
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
