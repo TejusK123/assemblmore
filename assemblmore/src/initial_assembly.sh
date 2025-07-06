@@ -32,3 +32,4 @@ while IFS=$'\t' read -r id _ strand _ _ _ _; do
     fi
 done < filtered_by_${base_name_reference}_contigs.tsv
 
+# fill_gaps.sh ordered_and_oriented_to_${base_name_reference}_assembly.fasta "$READS"
