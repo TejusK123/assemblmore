@@ -202,3 +202,151 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
     spanning_reads = [find_best_read(item) for item in merged]
 
     return spanning_reads
+
+
+def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: list[SeqIO.SeqRecord], reads = List[SeqIO.SeqRecord]) -> dict:
+    
+    groupings = list(orderings.groupby('chr', sort=False))
+    chr_to_contigs = {chr: contigs['contig'].to_list() for chr, contigs in groupings}
+    contigs_to_chr = {contig: chr for chr, contigs in groupings for contig in contigs['contig'].to_list()}
+    both, left, right = telomere_extension(alignments, orderings, expected_telomere_length=8000)
+    spanning_reads = simple_contig_span(alignments, orderings)
+    final_hash = deepcopy(chr_to_contigs)
+    for item in left:
+        chr = contigs_to_chr[item[0]]
+        final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
+
+    for item in right:
+        chr = contigs_to_chr[item[0]]
+        final_hash[chr].append(item[1]) if item[1] is not None else final_hash[chr].append(None)
+
+    for item in both:
+        chr = contigs_to_chr[item[0]]
+        final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
+        final_hash[chr].append(item[2]) if item[2] is not None else final_hash[chr].append(None)
+
+    def get_index(item, query):
+        """
+        Custom .index() pandas series break default
+        """
+        for i, contig in enumerate(item):
+            if type(contig) != str: 
+                pass
+            elif contig == query:
+                return i
+        return(None)
+                
+              
+    for i, item in enumerate(spanning_reads):
+        chr = contigs_to_chr[item['5_x']] if type(item) != str else contigs_to_chr[item]
+        
+        if type(item) != str:
+            index = get_index(final_hash[chr], item['5_y'])
+            final_hash[chr].insert(index, item)
+        else:
+            index = get_index(final_hash[chr], item)
+            final_hash[chr].insert(index, None)
+    
+    read_ids = [item.id for item in reads]
+    read_seqs = [item.seq for item in reads]
+    contig_ids = [item.id for item in contigs]
+    contig_seqs = [item.seq for item in contigs]
+
+    #test = deepcopy(final_hash['III'])
+    def combine_contigs(arr: list) -> list:
+
+        def inter_contig_merge(str1, str2, series_rules):
+            
+            if not isinstance(str1, str):
+                l_str = str1
+            else:
+                l_str = contig_seqs[contig_ids.index(str1)]
+            #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
+            if not isinstance(str2, str):
+                r_str = str2
+            else:
+                r_str = contig_seqs[contig_ids.index(str2)]
+                
+            x = series_rules['8_x']
+            x_prime = series_rules['3_x']
+            y_prime = series_rules['2_y']
+            y = series_rules['7_y']
+            mid_str = read_seqs[read_ids.index(series_rules[0])]
+            
+
+            print(f"{series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
+            
+
+            return(l_str[:x] + mid_str[x_prime + 1:y_prime] + r_str[y:])      #<----not sure +1 or not, but it is not important now. Also read mismatches at ends not accounted for yet.
+
+
+
+        def telomere_merge(str1, series_rules, left = True):
+            """
+            Merges the contig with the telomere using the best spanning read.
+            """
+            if not isinstance(str1, str):
+                rel_str = str1
+            else:
+                rel_str = contig_seqs[contig_ids.index(str1)]
+            #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object, otherwise it is a string.
+
+            telo_str = read_seqs[read_ids.index(series_rules[0])]
+
+            if left:
+                x = series_rules[2]
+                print(f"{series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
+                return telo_str[:x] + rel_str
+            else:
+                y = series_rules[3]
+                print(f"{series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
+                return rel_str + telo_str[y + 1:]
+
+
+        i = 1
+        while i < len(arr) - 2:
+            
+            s1 = arr[i]
+            s2 = arr[i + 2]
+            merge_rule = arr[i + 1]
+
+            if isinstance(merge_rule, pd.Series):
+                merged = inter_contig_merge(s1, s2, merge_rule)
+                # Replace s1 and s2 with merged string
+                arr[i] = merged
+                # Remove merge rule and s2
+                del arr[i + 1:i + 3]
+                # Step back to try more merges with new merged result
+                i = max(i - 2, 1)
+            else:
+                i += 2
+        
+        # Handle telomere merges
+        if isinstance(arr[0], pd.Series):
+            arr[0] = telomere_merge(arr[1], arr[0], left=True)
+            del arr[1]
+        if isinstance(arr[-1], pd.Series):
+            arr[-1] = telomere_merge(arr[-2], arr[-1], left=False)
+            del arr[-2]
+        
+        
+        return(arr)
+    
+    final_merged = {chr: combine_contigs(item) for chr, item in final_hash.items()}
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) < 5:
+        print("Usage: python span_contigs.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
+        sys.exit(1)
+
+    alignments_file = pd.read_csv(sys.argv[1])
+    orderings_file = pd.read_csv(sys.argv[2])
+    contigs_file = list(SeqIO.parse(sys.argv[3], "fasta"))
+    reads_file = list(SeqIO.parse(sys.argv[4], "fasta"))
+
+
+
+    res = merge_contigs(alignments_file, orderings_file, contigs_file, reads_file)
+    print(res)
