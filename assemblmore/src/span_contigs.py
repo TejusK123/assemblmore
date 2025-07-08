@@ -6,13 +6,14 @@ from Bio import SeqIO
 from Bio import SeqRecord
 import sys
 from copy import deepcopy
+import os
 
 
 def get_readlength_stats(reads_file):
-    print(f"Reading read lengths from: {reads_file}")
+    print(f"[DEBUG] Reading read lengths from: {reads_file}")
     read_lengths = (len(record.seq) for record in SeqIO.parse(reads_file, "fasta"))
     stats = pd.Series(read_lengths).describe()
-    print(f"Read length stats:\n{stats}")
+    print(f"[DEBUG] Read length stats:\n{stats}")
     return stats
 
 
@@ -21,6 +22,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
     Extends the contigs at the telomeres using the best spanning reads.
     This function is a placeholder for future implementation.
     """
+    print("[DEBUG] Running telomere_extension...")
     ###############################
     by_contig = [(i, item) for i, item in alignments.groupby(5, sort=False)]
     t2t_contigs = [item for item in orderings.iterrows() if orderings['chr'].tolist().count(item[1]['chr']) <= 1]
@@ -55,12 +57,13 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
                 continue
             
     ############################### Groups contigs into three categories: extend both ends, extend left end, extend right end, extend neither.
-    print(f"Found {len(both)} contigs to extend both ends, {len(left)} contigs to extend left end, and {len(right)} contigs to extend right end.")
+    print(f"[DEBUG] Found {len(both)} contigs to extend both ends, {len(left)} contigs to extend left end, and {len(right)} contigs to extend right end.")
 
     def extend(contig: pd.DataFrame, expected_telomere_length: int = 8000, left: bool = True) -> pd.Series:
         """
         Extends the left end of the contig using the best spanning reads.
         """
+        print(f"[DEBUG] Extending {'left' if left else 'right'} end of contig...")
         # Placeholder for future implementation
         if left:
             #print("Extending left end of the contig.")
@@ -96,6 +99,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
         return best_read
     
     # Extend both ends, left end, and right end of the contigs.
+    print("[DEBUG] Extending both ends, left end, and right end of the contigs...")
     both_t = [(item[0], extend(item[1], left = True), extend(item[1], left = False)) for item in both]
     left_t = [(item[0], extend(item[1], left = True)) for item in left]
     right_t = [(item[0], extend(item[1], left = False)) for item in right]
@@ -106,14 +110,14 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
 
 failure_count = 0
 def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> List[str]:
-     
+    print("[DEBUG] Running simple_contig_span...") 
     def find_best_read(merged_alignments: pd.DataFrame) -> pd.Series:
         
         #print(f"This is the input {merged_alignments}")
 
         if not isinstance(merged_alignments, pd.DataFrame):
             
-            print(f"Warning: Empty alignment found between {merged_alignments[0]} and {merged_alignments[1]}. Skipping.")
+            print(f"[DEBUG] Warning: Empty alignment found between {merged_alignments[0]} and {merged_alignments[1]}. Skipping.")
             #global failure_count
             #failure_count += 1
             return merged_alignments[1]
@@ -127,10 +131,10 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
             num = re.split('S|H', x)[0]
             return int(num) if num.isdigit() else 0
         
-        print(f"Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
+        print(f"[DEBUG] Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
         points_of_interest = merged_alignments[(merged_alignments['1_x'] >= 100000)
-                                               & (merged_alignments['6_x'] - merged_alignments['8_x'] < 10)
-                                               & (merged_alignments['7_y'] < 10)
+                                               & (merged_alignments['6_x'] - merged_alignments['8_x'] < 100)
+                                               & (merged_alignments['7_y'] < 100)
                                                #Above conditions are variable for potential branch and bound algorithm
                                                #Below conditions are fixed:
                                                & (merged_alignments['4_x'] == '+') 
@@ -165,7 +169,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
         
         expected_gap_sizes = [get_expected_gap_sizes(item) for item in chrom_windows]
         for item in expected_gap_sizes:
-            print(item)
+            print(f"[DEBUG] Expected gap sizes: {item}")
 
         #print(expected_gap_sizes)
         try:
@@ -174,7 +178,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
         except:
             #global failure_count
             #failure_count += 1
-            print(f"Warning: No valid spanning read found between {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}. Failure count: {failure_count}")
+            print(f"[DEBUG] Warning: No valid spanning read found between {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}. Failure count: {failure_count}")
             return merged_alignments['5_y'].values[0]
 
         # Return entire row as a Series (will need all data for merging of contigs later)
@@ -184,13 +188,14 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
     by_contig = list(zip([item for _, item in alignments.groupby(5, sort=False)], orderings['chr']))
 
     # Group by contig and orderings to find pairs of alignments that are on the same chromosome
+    print("[DEBUG] Merging alignments to find common reads that span the contigs...")
     merged = list(map(lambda x: pd.merge(x[0][0], x[1][0], how = 'inner', on = 0), (filter(lambda x: x[0][1] == x[1][1], mit.pairwise(by_contig)))))
     
     #print([(merged[i-1], item, merged[i+1]) for i, item in enumerate(merged) if item.empty])
 
     for i, item in enumerate(merged):
         if item.empty:
-            print(f"Warning: Empty alignment found between {merged[i-1]['5_y'].values[0]} and {merged[i+1]['5_x'].values[0]}. Skipping.")
+            print(f"[DEBUG] Warning: Empty alignment found between {merged[i-1]['5_y'].values[0]} and {merged[i+1]['5_x'].values[0]}. Skipping.")
             item = (merged[i-1]['5_y'].values[0], merged[i+1]['5_x'].values[0])
             continue
 
@@ -199,19 +204,24 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
     # merge alignments to find common reads that span the contigs (probably no point in import more itertools just for the pairwise function, but it is more readable this way)
     #spanning_reads = [find_best_read(item) for item in merged if not item.empty]
     
+    print("[DEBUG] Finding best spanning reads for merged alignments...")
     spanning_reads = [find_best_read(item) for item in merged]
 
     return spanning_reads
 
 
-def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: list[SeqIO.SeqRecord], reads = List[SeqIO.SeqRecord]) -> dict:
-    
+def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: List[SeqIO.SeqRecord], reads: List[SeqIO.SeqRecord]) -> dict:
+    print("[DEBUG] Running merge_contigs...")
+    print(orderings.head())
     groupings = list(orderings.groupby('chr', sort=False))
     chr_to_contigs = {chr: contigs['contig'].to_list() for chr, contigs in groupings}
     contigs_to_chr = {contig: chr for chr, contigs in groupings for contig in contigs['contig'].to_list()}
+    print("[DEBUG] Running telomere_extension in merge_contigs...")
     both, left, right = telomere_extension(alignments, orderings, expected_telomere_length=8000)
+    print("[DEBUG] Running simple_contig_span in merge_contigs...")
     spanning_reads = simple_contig_span(alignments, orderings)
     final_hash = deepcopy(chr_to_contigs)
+    print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
     for item in left:
         chr = contigs_to_chr[item[0]]
         final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
@@ -237,6 +247,7 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: li
         return(None)
                 
               
+    print("[DEBUG] Inserting spanning reads into final_hash...")
     for i, item in enumerate(spanning_reads):
         chr = contigs_to_chr[item['5_x']] if type(item) != str else contigs_to_chr[item]
         
@@ -254,37 +265,43 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: li
 
     #test = deepcopy(final_hash['III'])
     def combine_contigs(arr: list) -> list:
+        print("[DEBUG] Combining contigs for a chromosome...")
 
+
+        ################################## This has a logical error, if compound merges this breaks.
         def inter_contig_merge(str1, str2, series_rules):
-            
+            print("[DEBUG] Running inter_contig_merge...")
             if not isinstance(str1, str):
                 l_str = str1
+                x = len(l_str) - series_rules['7_x'] + series_rules['8_x']
             else:
                 l_str = contig_seqs[contig_ids.index(str1)]
+                x = series_rules['8_x']
             #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
             if not isinstance(str2, str):
                 r_str = str2
             else:
                 r_str = contig_seqs[contig_ids.index(str2)]
-                
-            x = series_rules['8_x']
+            #^^^^ If inter merge is used, str2 is a Bio.Seq.Seq object
+
             x_prime = series_rules['3_x']
             y_prime = series_rules['2_y']
             y = series_rules['7_y']
             mid_str = read_seqs[read_ids.index(series_rules[0])]
             
 
-            print(f"{series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
+            print(f"[DEBUG] {series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
             
 
             return(l_str[:x] + mid_str[x_prime + 1:y_prime] + r_str[y:])      #<----not sure +1 or not, but it is not important now. Also read mismatches at ends not accounted for yet.
 
-
+        ##################################
 
         def telomere_merge(str1, series_rules, left = True):
             """
             Merges the contig with the telomere using the best spanning read.
             """
+            print(f"[DEBUG] Running telomere_merge ({'left' if left else 'right'})...")
             if not isinstance(str1, str):
                 rel_str = str1
             else:
@@ -295,22 +312,23 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: li
 
             if left:
                 x = series_rules[2]
-                print(f"{series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
+                print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
                 return telo_str[:x] + rel_str
             else:
                 y = series_rules[3]
-                print(f"{series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
+                print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
                 return rel_str + telo_str[y + 1:]
 
-
+        
         i = 1
         while i < len(arr) - 2:
-            
+            print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
             s1 = arr[i]
             s2 = arr[i + 2]
             merge_rule = arr[i + 1]
 
             if isinstance(merge_rule, pd.Series):
+                print(f"[DEBUG] Performing inter-contig merge between {s1} and {s2}...")
                 merged = inter_contig_merge(s1, s2, merge_rule)
                 # Replace s1 and s2 with merged string
                 arr[i] = merged
@@ -321,32 +339,66 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: li
             else:
                 i += 2
         
+
+        
         # Handle telomere merges
         if isinstance(arr[0], pd.Series):
+            print("[DEBUG] Performing left telomere merge...")
             arr[0] = telomere_merge(arr[1], arr[0], left=True)
             del arr[1]
         if isinstance(arr[-1], pd.Series):
+            print("[DEBUG] Performing right telomere merge...")
             arr[-1] = telomere_merge(arr[-2], arr[-1], left=False)
             del arr[-2]
         
         
         return(arr)
     
+    print("[DEBUG] Combining contigs for all chromosomes...")
     final_merged = {chr: combine_contigs(item) for chr, item in final_hash.items()}
+    print("[DEBUG] Finished merge_contigs.")
+
+    print("[DEBUG] Preparing output sequences...")
+    fasta_record = []
+    for chr, contigs in final_merged.items():
+        i = 0
+        for contig in contigs:
+            if isinstance(contig, str):
+                #print(f"  Contig: {contig} (length: {len(contig)})")
+                contig = contig_seqs[contig_ids.index(contig)]
+                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description="")
+                fasta_record.append(contig_record)
+                i += 1
+            elif contig is None:
+                pass
+            else:
+                #print(f"  Contig: {contig} (length: {len(contig)})")
+                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description="")
+                fasta_record.append(contig_record)
+                i += 1
+
+    return final_merged, fasta_record
 
 
 if __name__ == "__main__":
 
+    print("[DEBUG] Starting main process...")
     if len(sys.argv) < 5:
         print("Usage: python span_contigs.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
         sys.exit(1)
 
-    alignments_file = pd.read_csv(sys.argv[1])
-    orderings_file = pd.read_csv(sys.argv[2])
+    print("[DEBUG] Reading input files...")
+    alignments_file = pd.read_csv(sys.argv[1], delimiter='\t', header=None)
+    orderings_file = pd.read_csv(sys.argv[2], delimiter = '\t')
     contigs_file = list(SeqIO.parse(sys.argv[3], "fasta"))
     reads_file = list(SeqIO.parse(sys.argv[4], "fasta"))
+    
+    print("[DEBUG] Calling merge_contigs...")
+    final_merged, fasta_record = merge_contigs(alignments_file, orderings_file, contigs_file, reads_file)
+    print("[DEBUG] Final merged result:")
+    print(final_merged)
 
-
-
-    res = merge_contigs(alignments_file, orderings_file, contigs_file, reads_file)
-    print(res)
+    cur_dir = os.getcwd()
+    print(f"[DEBUG] Outputting FASTA file to: {cur_dir}")
+    SeqIO.write(fasta_record, os.path.join(cur_dir, "penultimate_automated_assembly.fasta"), "fasta")
+    print("[DEBUG] Finished writing output files.")
