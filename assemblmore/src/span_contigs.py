@@ -68,7 +68,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
         if left:
             #print("Extending left end of the contig.")
         
-            points_of_interest = contig[(contig[1] >= 100000) 
+            points_of_interest = contig[(contig[1] >= 50000) 
                                 & (contig[11] >= 60)
 
                                 & (contig[4] == '+') # Not necessary but convenient. If needed take negative strand reads into account.
@@ -81,7 +81,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
             
         else:
             #print("Extending right end of the contig.")
-            points_of_interest = contig[(contig[1] >= 100000) 
+            points_of_interest = contig[(contig[1] >= 50000) 
                                 & (contig[11] >= 60)
 
                                 & (contig[4] == '+') # Not necessary but convenient. If needed take negative strand reads into account.
@@ -132,7 +132,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
             return int(num) if num.isdigit() else 0
         
         print(f"[DEBUG] Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
-        points_of_interest = merged_alignments[(merged_alignments['1_x'] >= 100000)
+        points_of_interest = merged_alignments[(merged_alignments['1_x'] >= 50000)
                                                & (merged_alignments['6_x'] - merged_alignments['8_x'] < 100)
                                                & (merged_alignments['7_y'] < 100)
                                                #Above conditions are variable for potential branch and bound algorithm
