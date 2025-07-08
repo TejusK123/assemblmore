@@ -354,26 +354,46 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: Li
         
         return(arr)
     
+
+
+    def generate_descriptions(contigs: List[str]) -> List[str]:
+        if isinstance(contigs, pd.Series):
+            return(contigs[0])
+        elif contigs is None:
+            return('None')
+        else:
+            return(contigs)
+        
+
     print("[DEBUG] Combining contigs for all chromosomes...")
-    final_merged = {chr: combine_contigs(item) for chr, item in final_hash.items()}
+    final_merged = {chr: combine_contigs(item) for chr, item in deepcopy(final_hash).items()}
     print("[DEBUG] Finished merge_contigs.")
+
+    print("[DEBUG] Generating descriptions for contigs...")
+    final_labels = {chr: ('-'.join([generate_descriptions(item) for item in final_hash[chr]])).split('-None-') for chr in final_hash}
+    print(f"[DEBUG] Generated descriptions: {final_labels}")
+
+
+
+    for chr, contigs in final_merged.items():
+        final_merged[chr] = [item for item in final_merged[chr] if item is not None]  # Remove None values so the indices match the labels
+
 
     print("[DEBUG] Preparing output sequences...")
     fasta_record = []
     for chr, contigs in final_merged.items():
-        i = 0
-        for contig in contigs:
+        for i, contig in enumerate(contigs):
             if isinstance(contig, str):
                 #print(f"  Contig: {contig} (length: {len(contig)})")
                 contig = contig_seqs[contig_ids.index(contig)]
-                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description="")
+                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description = final_labels[chr][i] if i < len(final_labels[chr]) else "")
                 fasta_record.append(contig_record)
                 i += 1
             elif contig is None:
                 pass
             else:
                 #print(f"  Contig: {contig} (length: {len(contig)})")
-                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description="")
+                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description = final_labels[chr][i] if i < len(final_labels[chr]) else "")
                 fasta_record.append(contig_record)
                 i += 1
 
