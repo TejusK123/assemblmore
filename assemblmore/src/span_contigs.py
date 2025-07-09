@@ -17,7 +17,7 @@ def get_readlength_stats(reads_file):
     return stats
 
 
-def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expected_telomere_length: int = 8000) -> List[List[str]]:
+def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expected_telomere_length: int = 8000, length_threshold: int = 0, phred_threshold: int = 20) -> List[List[str]]:
     """
     Extends the contigs at the telomeres using the best spanning reads.
     This function is a placeholder for future implementation.
@@ -59,7 +59,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
     ############################### Groups contigs into three categories: extend both ends, extend left end, extend right end, extend neither.
     print(f"[DEBUG] Found {len(both)} contigs to extend both ends, {len(left)} contigs to extend left end, and {len(right)} contigs to extend right end.")
 
-    def extend(contig: pd.DataFrame, expected_telomere_length: int = 8000, left: bool = True) -> pd.Series:
+    def extend(contig: pd.DataFrame, expected_telomere_length: int = 8000, phred_threshold: int = 20, length_threshold: int = 0, left: bool = True) -> pd.Series:
         """
         Extends the left end of the contig using the best spanning reads.
         """
@@ -68,8 +68,8 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
         if left:
             #print("Extending left end of the contig.")
         
-            points_of_interest = contig[(contig[1] >= 50000) 
-                                & (contig[11] >= 60)
+            points_of_interest = contig[(contig[1] >= length_threshold) 
+                                & (contig[11] >= phred_threshold)
 
                                 & (contig[4] == '+') # Not necessary but convenient. If needed take negative strand reads into account.
                                 & (contig[7] < 100) #<- specific to left extension
@@ -81,8 +81,8 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
             
         else:
             #print("Extending right end of the contig.")
-            points_of_interest = contig[(contig[1] >= 50000) 
-                                & (contig[11] >= 60)
+            points_of_interest = contig[(contig[1] >= length_threshold) 
+                                & (contig[11] >= phred_threshold)
 
                                 & (contig[4] == '+') # Not necessary but convenient. If needed take negative strand reads into account.
                                 & (contig[6] - contig[8] < 100) #<- specific to right extension (the specific value needs to be determined)
@@ -100,18 +100,18 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
     
     # Extend both ends, left end, and right end of the contigs.
     print("[DEBUG] Extending both ends, left end, and right end of the contigs...")
-    both_t = [(item[0], extend(item[1], left = True), extend(item[1], left = False)) for item in both]
-    left_t = [(item[0], extend(item[1], left = True)) for item in left]
-    right_t = [(item[0], extend(item[1], left = False)) for item in right]
+    both_t = [(item[0], extend(item[1], left = True, phred_threshold=phred_threshold, length_threshold = length_threshold), extend(item[1], left = False, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in both]
+    left_t = [(item[0], extend(item[1], left = True, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in left]
+    right_t = [(item[0], extend(item[1], left = False, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in right]
     #print(both_t)
     return [both_t, left_t, right_t]
 
 
 
 failure_count = 0
-def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> List[str]:
+def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0) -> List[str]:
     print("[DEBUG] Running simple_contig_span...") 
-    def find_best_read(merged_alignments: pd.DataFrame) -> pd.Series:
+    def find_best_read(merged_alignments: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0) -> pd.Series:
         
         #print(f"This is the input {merged_alignments}")
 
@@ -132,15 +132,15 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
             return int(num) if num.isdigit() else 0
         
         print(f"[DEBUG] Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
-        points_of_interest = merged_alignments[(merged_alignments['1_x'] >= 50000)
+        points_of_interest = merged_alignments[(merged_alignments['1_x'] >= length_threshold)
                                                & (merged_alignments['6_x'] - merged_alignments['8_x'] < 100)
                                                & (merged_alignments['7_y'] < 100)
                                                #Above conditions are variable for potential branch and bound algorithm
                                                #Below conditions are fixed:
                                                & (merged_alignments['4_x'] == '+') 
                                                & (merged_alignments['4_y'] == '+')
-                                               & ((merged_alignments['11_x'] >= 60) | (merged_alignments['11_y'] >= 60))
-                                               #& (merged_alignments['11_y'] >= 60)
+                                               & (merged_alignments['11_x'] >= phred_threshold) #| (merged_alignments['11_y'] >= 60))
+                                               & (merged_alignments['11_y'] >= phred_threshold)
                                                 
                                                & (merged_alignments['2_y'] > merged_alignments['3_x'])
                                                ].copy()
@@ -205,7 +205,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame) -> Lis
     #spanning_reads = [find_best_read(item) for item in merged if not item.empty]
     
     print("[DEBUG] Finding best spanning reads for merged alignments...")
-    spanning_reads = [find_best_read(item) for item in merged]
+    spanning_reads = [find_best_read(item, phred_threshold=phred_threshold, length_threshold=length_threshold) for item in merged]
 
     return spanning_reads
 
