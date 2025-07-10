@@ -1,13 +1,14 @@
 import pandas as pd 
 import more_itertools as mit
-import re
 from typing import List
 from Bio import SeqIO
 from Bio import SeqRecord
 import sys
 from copy import deepcopy
 import os
+import click
 
+#import re
 
 def get_readlength_stats(reads_file):
     print(f"[DEBUG] Reading read lengths from: {reads_file}")
@@ -63,7 +64,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
         """
         Extends the left end of the contig using the best spanning reads.
         """
-        print(f"[DEBUG] Extending {'left' if left else 'right'} end of contig...")
+        #print(f"[DEBUG] Extending {'left' if left else 'right'} end of contig...")
         # Placeholder for future implementation
         if left:
             #print("Extending left end of the contig.")
@@ -99,7 +100,7 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
         return best_read
     
     # Extend both ends, left end, and right end of the contigs.
-    print("[DEBUG] Extending both ends, left end, and right end of the contigs...")
+    #print("[DEBUG] Extending both ends, left end, and right end of the contigs...")
     both_t = [(item[0], extend(item[1], left = True, phred_threshold=phred_threshold, length_threshold = length_threshold), extend(item[1], left = False, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in both]
     left_t = [(item[0], extend(item[1], left = True, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in left]
     right_t = [(item[0], extend(item[1], left = False, phred_threshold=phred_threshold, length_threshold = length_threshold)) for item in right]
@@ -123,13 +124,13 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
             return merged_alignments[1]
         
           # Return the right end of the alignment as a fallback
-        def get_clip_length(x: str) -> int:
-            """
-            Gets Hard/Soft clip length from the PAF file format.
-            Returns the length of the clip if it exists, otherwise returns 0.
-            """
-            num = re.split('S|H', x)[0]
-            return int(num) if num.isdigit() else 0
+        # def get_clip_length(x: str) -> int:
+        #     """
+        #     Gets Hard/Soft clip length from the PAF file format.
+        #     Returns the length of the clip if it exists, otherwise returns 0.
+        #     """
+        #     num = re.split('S|H', x)[0]
+        #     return int(num) if num.isdigit() else 0
         
         print(f"[DEBUG] Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
         points_of_interest = merged_alignments[(merged_alignments['1_x'] >= length_threshold)
@@ -168,8 +169,8 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
             return res
         
         expected_gap_sizes = [get_expected_gap_sizes(item) for item in chrom_windows]
-        for item in expected_gap_sizes:
-            print(f"[DEBUG] Expected gap sizes: {item}")
+        #for item in expected_gap_sizes:
+            #print(f"[DEBUG] Expected gap sizes: {item}")
 
         #print(expected_gap_sizes)
         try:
@@ -209,17 +210,49 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
 
     return spanning_reads
 
+@click.command()
+@click.argument('alignments_file', type=click.Path(exists=True))
+@click.argument('orderings_file', type=click.Path(exists=True))
+@click.argument('contigs_file', type=click.Path(exists=True))
+@click.argument('reads_file', type=click.Path(exists=True))
+@click.option('--expected_telomere_length', default=8000, help='Expected length of telomeres (default: 8000)')
+@click.option('--length_threshold', default=0, help='Minimum length of reads to consider (default: 0)')
+@click.option('--phred_threshold', default=20, help='Minimum Phred quality score of reads to consider (default: equivalent to 1/100 chance of mapping misplacement <20 for telomere extension, 10 for spanning reads>)')
+def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, expected_telomere_length, length_threshold, phred_threshold) -> dict:
 
-def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: List[SeqIO.SeqRecord], reads: List[SeqIO.SeqRecord]) -> dict:
+
+    click.echo(f"[DEBUG] Starting merge_contigs with parameters:\n")
+    click.echo(f"alignments_file: {alignments_file}")
+    click.echo(f"orderings_file: {orderings_file}")
+    click.echo(f"contigs_file: {contigs_file}")
+    click.echo(f"reads_file: {reads_file}")
+    click.echo(f"expected_telomere_length: {expected_telomere_length}")
+    click.echo(f"length_threshold: {length_threshold}")
+    click.echo(f"phred_threshold: {phred_threshold}")
+
+    print("[DEBUG] Reading input files...")
+    alignments = pd.read_csv(alignments_file, delimiter='\t', header=None)
+    orderings = pd.read_csv(orderings_file, delimiter = '\t')
+    contigs = list(SeqIO.parse(contigs_file, "fasta"))
+    reads = list(SeqIO.parse(reads_file, "fasta"))
+
     print("[DEBUG] Running merge_contigs...")
     print(orderings.head())
     groupings = list(orderings.groupby('chr', sort=False))
     chr_to_contigs = {chr: contigs['contig'].to_list() for chr, contigs in groupings}
     contigs_to_chr = {contig: chr for chr, contigs in groupings for contig in contigs['contig'].to_list()}
+
     print("[DEBUG] Running telomere_extension in merge_contigs...")
-    both, left, right = telomere_extension(alignments, orderings, expected_telomere_length=8000)
+    both, left, right = telomere_extension(alignments, orderings, 
+                                           expected_telomere_length=expected_telomere_length, 
+                                           length_threshold=length_threshold, 
+                                           phred_threshold=phred_threshold)
+    
     print("[DEBUG] Running simple_contig_span in merge_contigs...")
-    spanning_reads = simple_contig_span(alignments, orderings)
+    spanning_reads = simple_contig_span(alignments, orderings, 
+                                        length_threshold=length_threshold, 
+                                        phred_threshold=(phred_threshold/2))  #<- phred_threshold is halved for spanning reads since the mapping is paired.
+    
     final_hash = deepcopy(chr_to_contigs)
     print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
     for item in left:
@@ -290,7 +323,7 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: Li
             mid_str = read_seqs[read_ids.index(series_rules[0])]
             
 
-            print(f"[DEBUG] {series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
+            #print(f"[DEBUG] {series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
             
 
             return(l_str[:x] + mid_str[x_prime + 1:y_prime] + r_str[y:])      #<----not sure +1 or not, but it is not important now. Also read mismatches at ends not accounted for yet.
@@ -312,23 +345,23 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: Li
 
             if left:
                 x = series_rules[2]
-                print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
+                #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
                 return telo_str[:x] + rel_str
             else:
                 y = series_rules[3]
-                print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
+                #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
                 return rel_str + telo_str[y + 1:]
 
         
         i = 1
         while i < len(arr) - 2:
-            print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
+            #print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
             s1 = arr[i]
             s2 = arr[i + 2]
             merge_rule = arr[i + 1]
 
             if isinstance(merge_rule, pd.Series):
-                print(f"[DEBUG] Performing inter-contig merge between {s1} and {s2}...")
+                #print(f"[DEBUG] Performing inter-contig merge between {s1} and {s2}...")
                 merged = inter_contig_merge(s1, s2, merge_rule)
                 # Replace s1 and s2 with merged string
                 arr[i] = merged
@@ -343,11 +376,11 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: Li
         
         # Handle telomere merges
         if isinstance(arr[0], pd.Series):
-            print("[DEBUG] Performing left telomere merge...")
+            #print("[DEBUG] Performing left telomere merge...")
             arr[0] = telomere_merge(arr[1], arr[0], left=True)
             del arr[1]
         if isinstance(arr[-1], pd.Series):
-            print("[DEBUG] Performing right telomere merge...")
+            #print("[DEBUG] Performing right telomere merge...")
             arr[-1] = telomere_merge(arr[-2], arr[-1], left=False)
             del arr[-2]
         
@@ -397,24 +430,7 @@ def merge_contigs(alignments: pd.DataFrame, orderings: pd.DataFrame, contigs: Li
                 fasta_record.append(contig_record)
                 i += 1
 
-    return final_merged, fasta_record
 
-
-if __name__ == "__main__":
-
-    print("[DEBUG] Starting main process...")
-    if len(sys.argv) < 5:
-        print("Usage: python span_contigs.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
-        sys.exit(1)
-
-    print("[DEBUG] Reading input files...")
-    alignments_file = pd.read_csv(sys.argv[1], delimiter='\t', header=None)
-    orderings_file = pd.read_csv(sys.argv[2], delimiter = '\t')
-    contigs_file = list(SeqIO.parse(sys.argv[3], "fasta"))
-    reads_file = list(SeqIO.parse(sys.argv[4], "fasta"))
-    
-    print("[DEBUG] Calling merge_contigs...")
-    final_merged, fasta_record = merge_contigs(alignments_file, orderings_file, contigs_file, reads_file)
     print("[DEBUG] Final merged result:")
     print(final_merged)
 
@@ -422,3 +438,29 @@ if __name__ == "__main__":
     print(f"[DEBUG] Outputting FASTA file to: {cur_dir}")
     SeqIO.write(fasta_record, os.path.join(cur_dir, "penultimate_automated_assembly.fasta"), "fasta")
     print("[DEBUG] Finished writing output files.")
+
+    return final_merged, fasta_record
+
+
+if __name__ == "__main__":
+    merge_contigs()
+    # print("[DEBUG] Starting main process...")
+    # if len(sys.argv) < 5:
+    #     print("Usage: python span_contigs.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
+    #     sys.exit(1)
+
+    # print("[DEBUG] Reading input files...")
+    # alignments_file = pd.read_csv(sys.argv[1], delimiter='\t', header=None)
+    # orderings_file = pd.read_csv(sys.argv[2], delimiter = '\t')
+    # contigs_file = list(SeqIO.parse(sys.argv[3], "fasta"))
+    # reads_file = list(SeqIO.parse(sys.argv[4], "fasta"))
+    
+    # print("[DEBUG] Calling merge_contigs...")
+    #final_merged, fasta_record = merge_contigs()
+    # print("[DEBUG] Final merged result:")
+    # print(final_merged)
+
+    # cur_dir = os.getcwd()
+    # print(f"[DEBUG] Outputting FASTA file to: {cur_dir}")
+    # SeqIO.write(fasta_record, os.path.join(cur_dir, "penultimate_automated_assembly.fasta"), "fasta")
+    # print("[DEBUG] Finished writing output files.")
