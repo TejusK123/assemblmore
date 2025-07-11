@@ -143,7 +143,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
                                                & (merged_alignments['11_x'] >= phred_threshold) #| (merged_alignments['11_y'] >= 60))
                                                & (merged_alignments['11_y'] >= phred_threshold)
                                                 
-                                               & (merged_alignments['2_y'] > merged_alignments['3_x'])
+                                               #& (merged_alignments['2_y'] > merged_alignments['3_x'])
                                                ].copy()
 
         #points_of_interest['criterion'] = points_of_interest['17_y'].apply(get_clip_length)
@@ -251,7 +251,7 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     print("[DEBUG] Running simple_contig_span in merge_contigs...")
     spanning_reads = simple_contig_span(alignments, orderings, 
                                         length_threshold=length_threshold, 
-                                        phred_threshold=(phred_threshold/2))  #<- phred_threshold is halved for spanning reads since the mapping is paired.
+                                        phred_threshold=phred_threshold)  #<- phred_threshold is halved for spanning reads since the mapping is paired.
     
     final_hash = deepcopy(chr_to_contigs)
     print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
