@@ -9,7 +9,7 @@ import os
 import click
 
 #import re
-
+#testingKeychain
 def get_readlength_stats(reads_file):
     print(f"[DEBUG] Reading read lengths from: {reads_file}")
     read_lengths = (len(record.seq) for record in SeqIO.parse(reads_file, "fasta"))
