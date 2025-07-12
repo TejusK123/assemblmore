@@ -306,10 +306,11 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
             print("[DEBUG] Running inter_contig_merge...")
             if not isinstance(str1, str):
                 l_str = str1
-                x = len(l_str) - series_rules['7_x'] + series_rules['8_x']
+                base_x = len(l_str) - series_rules['7_x'] + series_rules['8_x'] #If str1 is SeqIO object, that means it has been merged to some extent and the indices stored in '8_x' are incorrect.
+                
             else:
                 l_str = contig_seqs[contig_ids.index(str1)]
-                x = series_rules['8_x']
+                base_x = series_rules['8_x']
             #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
             if not isinstance(str2, str):
                 r_str = str2
@@ -317,9 +318,22 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
                 r_str = contig_seqs[contig_ids.index(str2)]
             #^^^^ If inter merge is used, str2 is a Bio.Seq.Seq object
 
+
+            base_y = series_rules['7_y']
+            #print(f"[DEBUG] base_x: {base_x}, base_y: {base_y}, str1: {str1}, str2: {str2}")
+
             x_prime = series_rules['3_x']
             y_prime = series_rules['2_y']
-            y = series_rules['7_y']
+            
+
+            if series_rules['criterion'] < 0:
+                x = base_x - (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the left contig, not the right one.
+                y = base_y + (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the right contig, not the left one.
+                x_prime, y_prime = y_prime, x_prime 
+            else:
+                x = base_x
+                y = base_y
+
             mid_str = read_seqs[read_ids.index(series_rules[0])]
             
 
