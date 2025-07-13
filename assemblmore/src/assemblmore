@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# assemblmore - Wrapper script for the assemblmore pipeline
+# This allows running assemblmore from anywhere
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/assemblmore_pipeline.sh" "$@"

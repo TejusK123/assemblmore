@@ -409,8 +409,9 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
         elif contigs is None:
             return('None')
         else:
-            return(contigs)
-        
+            contig_length = len(contig_seqs[contig_ids.index(contigs)]) if contigs else 0
+            return(f"{contigs}_len_{contig_length}")
+
 
     print("[DEBUG] Combining contigs for all chromosomes...")
     final_merged = {chr: combine_contigs(item) for chr, item in deepcopy(final_hash).items()}
@@ -450,7 +451,7 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
 
     cur_dir = os.getcwd()
     print(f"[DEBUG] Outputting FASTA file to: {cur_dir}")
-    SeqIO.write(fasta_record, os.path.join(cur_dir, "penultimate_automated_assembly.fasta"), "fasta")
+    SeqIO.write(fasta_record, os.path.join(cur_dir, "final_assembly.fasta"), "fasta")
     print("[DEBUG] Finished writing output files.")
 
     return final_merged, fasta_record
@@ -458,23 +459,3 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
 
 if __name__ == "__main__":
     merge_contigs()
-    # print("[DEBUG] Starting main process...")
-    # if len(sys.argv) < 5:
-    #     print("Usage: python span_contigs.py <alignments_file> <orderings_file> <contigs_file> <reads_file>")
-    #     sys.exit(1)
-
-    # print("[DEBUG] Reading input files...")
-    # alignments_file = pd.read_csv(sys.argv[1], delimiter='\t', header=None)
-    # orderings_file = pd.read_csv(sys.argv[2], delimiter = '\t')
-    # contigs_file = list(SeqIO.parse(sys.argv[3], "fasta"))
-    # reads_file = list(SeqIO.parse(sys.argv[4], "fasta"))
-    
-    # print("[DEBUG] Calling merge_contigs...")
-    #final_merged, fasta_record = merge_contigs()
-    # print("[DEBUG] Final merged result:")
-    # print(final_merged)
-
-    # cur_dir = os.getcwd()
-    # print(f"[DEBUG] Outputting FASTA file to: {cur_dir}")
-    # SeqIO.write(fasta_record, os.path.join(cur_dir, "penultimate_automated_assembly.fasta"), "fasta")
-    # print("[DEBUG] Finished writing output files.")

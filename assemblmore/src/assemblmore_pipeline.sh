@@ -1,0 +1,392 @@
+#!/bin/bash
+
+# assemblmore_pipeline.sh - Main pipeline for genome assembly improvement
+# This script orchestrates the complete workflow to improve genome assemblies
+
+set -euo pipefail
+
+# Default values
+MAP_PRESET_1="asm20"
+MAP_PRESET_2="map-ont"
+MAX_ALIGNMENTS=5
+OUTPUT_DIR="assemblmore_output"
+KEEP_INTERMEDIATE=false
+VERBOSE=false
+EXPECTED_TELOMERE_LENGTH=8000
+LENGTH_THRESHOLD=0
+PHRED_THRESHOLD=20
+
+# Function to print usage
+usage() {
+    cat << EOF
+Usage: $0 [OPTIONS] <reference_genome.fasta> <assembly.fasta> <nanopore_reads.fasta>
+
+Improve genome assemblies using a multi-step pipeline that:
+1. Maps assembly contigs to reference genome
+2. Determines optimal contig placement and orientation
+3. Creates partially refined assembly
+4. Maps reads to refined assembly
+5. Produces final improved assembly
+
+REQUIRED ARGUMENTS:
+    reference_genome.fasta    Reference genome for initial mapping
+    assembly.fasta           Input assembly to be improved
+    nanopore_reads.fasta     Raw Nanopore reads
+
+OPTIONS:
+    -o, --output-dir DIR     Output directory (default: assemblmore_output)
+    -p, --preset1 PRESET     Minimap2 preset for step 1 (default: asm20)
+    -P, --preset2 PRESET     Minimap2 preset for step 3 (default: map-ont)
+    -N, --max-alignments N   Maximum alignments per read (default: 5)
+    -t, --telomere-length N  Expected telomere length (default: 8000) <ensure overestimation rather than underestimation>
+    -l, --length-threshold N Minimum read length threshold (default: 0)
+    -q, --phred-threshold N  Minimum Phred quality threshold (default: 20)
+    -k, --keep-intermediate  Keep intermediate files
+    -v, --verbose            Verbose output
+    -h, --help              Show this help message
+
+EXAMPLES:
+    # Basic usage
+    $0 reference.fasta assembly.fasta reads.fasta
+    
+    # With custom output directory and presets
+    $0 -o results -p asm10 -P map-hifi -t 10000 -q 30 reference.fasta assembly.fasta reads.fasta
+    
+    # Keep intermediate files for debugging
+    $0 -k -v reference.fasta assembly.fasta reads.fasta
+
+EOF
+}
+
+# Function to log messages
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
+}
+
+# Function to log verbose messages
+log_verbose() {
+    if [ "$VERBOSE" = true ]; then
+        log "VERBOSE: $*"
+    fi
+}
+
+# Function to check if required tools are installed
+check_dependencies() {
+    local tools=("minimap2" "samtools" "paftools.js" "python" "seqkit")
+    local missing=()
+    
+    for tool in "${tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing[@]} -ne 0 ]; then
+        log "ERROR: Missing required tools: ${missing[*]}"
+        log "Please install the missing tools and try again."
+        exit 1
+    fi
+    
+    # Check Python dependencies
+    local python_deps=("numpy" "pandas" "Bio" "networkx" "more_itertools" "click")
+    local missing_python=()
+    
+    for dep in "${python_deps[@]}"; do
+        if ! python -c "import $dep" &> /dev/null; then
+            missing_python+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing_python[@]} -ne 0 ]; then
+        log "ERROR: Missing required Python packages: ${missing_python[*]}"
+        log "Install with: pip install numpy pandas biopython networkx more_itertools click"
+        exit 1
+    fi
+    
+    log "All required dependencies found"
+}
+
+# Function to validate input files
+validate_inputs() {
+    local ref_genome="$1"
+    local assembly="$2"
+    local reads="$3"
+    
+    if [ ! -f "$ref_genome" ]; then
+        log "ERROR: Reference genome file '$ref_genome' does not exist"
+        exit 1
+    fi
+    
+    if [ ! -f "$assembly" ]; then
+        log "ERROR: Assembly file '$assembly' does not exist"
+        exit 1
+    fi
+    
+    if [ ! -f "$reads" ]; then
+        log "ERROR: Nanopore reads file '$reads' does not exist"
+        exit 1
+    fi
+    
+    log "All input files validated"
+}
+
+# Function to get absolute path
+get_abs_path() {
+    local input_path="$1"
+    
+    # If already absolute path, return as-is
+    if [[ "$input_path" = /* ]]; then
+        echo "$input_path"
+        return 0
+    fi
+    
+    # For relative paths, use realpath if available, otherwise manual resolution
+    if command -v realpath &> /dev/null; then
+        realpath "$input_path" 2>/dev/null || {
+            # Fallback to manual resolution if realpath fails
+            echo "$(pwd)/$input_path"
+        }
+    else
+        # Manual resolution for systems without realpath
+        local dir_part=$(dirname "$input_path")
+        local file_part=$(basename "$input_path")
+        
+        # Try to cd to directory and get absolute path
+        if [ -d "$dir_part" ]; then
+            echo "$(cd "$dir_part" && pwd)/$file_part"
+        else
+            # If directory doesn't exist, return the path as constructed from pwd
+            echo "$(pwd)/$input_path"
+        fi
+    fi
+}
+
+# Function to cleanup intermediate files
+cleanup() {
+    if [ "$KEEP_INTERMEDIATE" = false ]; then
+        log "Cleaning up intermediate files..."
+        # Remove intermediate files but keep final outputs
+        find "$OUTPUT_DIR" -name "*.sam" -delete 2>/dev/null || true
+        find "$OUTPUT_DIR" -name "*_mapped_to_*.sorted.paf" -not -name "final_*" -delete 2>/dev/null || true
+        find "$OUTPUT_DIR" -name "*_mapped_to_*.sorted.bam*" -delete 2>/dev/null || true
+    else
+        log "Keeping all intermediate files as requested"
+    fi
+}
+
+# Function to run a step with error handling
+run_step() {
+    local step_name="$1"
+    local step_cmd="$2"
+    
+    log "Starting $step_name..."
+    log_verbose "Command: $step_cmd"
+    
+    if eval "$step_cmd"; then
+        log "✓ $step_name completed successfully"
+    else
+        log "✗ $step_name failed"
+        exit 1
+    fi
+}
+
+# Parse command line arguments
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -o|--output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        -p|--preset1)
+            MAP_PRESET_1="$2"
+            shift 2
+            ;;
+        -P|--preset2)
+            MAP_PRESET_2="$2"
+            shift 2
+            ;;
+        -N|--max-alignments)
+            MAX_ALIGNMENTS="$2"
+            shift 2
+            ;;
+        -t|--telomere-length)
+            EXPECTED_TELOMERE_LENGTH="$2"
+            shift 2
+            ;;
+        -l|--length-threshold)
+            LENGTH_THRESHOLD="$2"
+            shift 2
+            ;;
+        -q|--phred-threshold)
+            PHRED_THRESHOLD="$2"
+            shift 2
+            ;;
+        -k|--keep-intermediate)
+            KEEP_INTERMEDIATE=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            log "ERROR: Unknown option $1"
+            usage
+            exit 1
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Check for required positional arguments
+if [ ${#POSITIONAL_ARGS[@]} -ne 3 ]; then
+    log "ERROR: Exactly 3 positional arguments required <reference_genome.fasta> <assembly.fasta> <nanopore_reads.fasta>"
+    log "Provided: ${POSITIONAL_ARGS[*]}"
+    usage
+    exit 1
+fi
+
+REFERENCE_GENOME="${POSITIONAL_ARGS[0]}"
+ASSEMBLY="${POSITIONAL_ARGS[1]}"
+NANOPORE_READS="${POSITIONAL_ARGS[2]}"
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Main pipeline execution
+main() {
+    log "Starting assemblmore pipeline"
+    log "Reference genome: $REFERENCE_GENOME"
+    log "Assembly: $ASSEMBLY"
+    log "Nanopore reads: $NANOPORE_READS"
+    log "Output directory: $OUTPUT_DIR"
+    
+    # Check dependencies
+    check_dependencies
+    
+    # Get absolute paths for input files (before changing directories)
+    REF_ABS=$(get_abs_path "$REFERENCE_GENOME")
+    ASM_ABS=$(get_abs_path "$ASSEMBLY")
+    READS_ABS=$(get_abs_path "$NANOPORE_READS")
+    
+    # Validate inputs using absolute paths
+    validate_inputs "$REF_ABS" "$ASM_ABS" "$READS_ABS"
+    
+    # Create output directory and change to it
+    mkdir -p "$OUTPUT_DIR"
+    cd "$OUTPUT_DIR"
+    
+    # Generate base names for file tracking
+    REF_BASE=$(basename "$REF_ABS" | sed 's/\.\(fasta\|fa\|fna\)$//')
+    ASM_BASE=$(basename "$ASM_ABS" | sed 's/\.\(fasta\|fa\|fna\)$//')
+    READS_BASE=$(basename "$READS_ABS" | sed 's/\.\(fastq\|fq\|fasta\|fa\)$//')
+    
+    log_verbose "Reference base name: $REF_BASE"
+    log_verbose "Assembly base name: $ASM_BASE"
+    log_verbose "Reads base name: $READS_BASE"
+    #log_verbose "PAF file: $STEP1_PAF"
+    #log_verbose "Actual reference base (from PAF): $ACTUAL_REF_BASE"
+    log_verbose "Expected telomere length: $EXPECTED_TELOMERE_LENGTH"
+    log_verbose "Length threshold: $LENGTH_THRESHOLD"
+    log_verbose "Phred threshold: $PHRED_THRESHOLD"
+    
+    # Step 1: Map assembly contigs to reference genome
+    STEP1_PAF="${ASM_BASE}_mapped_to_${REF_BASE}.sorted.paf"
+    run_step "Step 1: Mapping assembly contigs to reference" \
+        "\"$SCRIPT_DIR/fill_gaps.sh\" \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
+    
+    if [ ! -f "$STEP1_PAF" ]; then
+        log "ERROR: Step 1 did not produce expected output file: $STEP1_PAF"
+        exit 1
+    fi
+    
+    # Step 2: Determine contig placements and create initial refined assembly
+    # Note: The actual output names are determined by contig_placements.py based on PAF filename parsing
+    # We need to figure out what the actual output names will be
+    PAF_BASE=$(basename "$STEP1_PAF" .sorted.paf)
+    if [[ "$PAF_BASE" == *"_mapped_to_"* ]]; then
+        ACTUAL_REF_BASE="${PAF_BASE##*_mapped_to_}"
+    else
+        ACTUAL_REF_BASE="$REF_BASE"
+    fi
+    
+    ACTUAL_REF_BASE="${ACTUAL_REF_BASE%.fasta}"
+    ACTUAL_REF_BASE="${ACTUAL_REF_BASE%.fa}"
+    ACTUAL_REF_BASE="${ACTUAL_REF_BASE%.fna}"
+
+    FILTERED_TSV="filtered_by_${ACTUAL_REF_BASE}_contigs.tsv"
+    INITIAL_ASSEMBLY="ordered_and_oriented_to_${ACTUAL_REF_BASE}_assembly.fasta"
+    run_step "Step 2: Creating initial refined assembly" \
+        "\"$SCRIPT_DIR/initial_assembly.sh\" \"$STEP1_PAF\" \"$READS_ABS\" \"$ASM_ABS\""
+    
+    if [ ! -f "$FILTERED_TSV" ] || [ ! -f "$INITIAL_ASSEMBLY" ]; then
+        log "ERROR: Step 2 did not produce expected output files"
+        log "Expected: $FILTERED_TSV and $INITIAL_ASSEMBLY"
+        exit 1
+    fi
+    
+    # Step 3: Map reads to the partially refined assembly
+    INITIAL_BASE="ordered_and_oriented_to_${ACTUAL_REF_BASE}_assembly"
+    STEP3_PAF="${READS_BASE}_mapped_to_${INITIAL_BASE}.sorted.paf"
+    run_step "Step 3: Mapping reads to refined assembly" \
+        "\"$SCRIPT_DIR/fill_gaps.sh\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" \"$MAP_PRESET_2\" \"$MAX_ALIGNMENTS\""
+    
+    if [ ! -f "$STEP3_PAF" ]; then
+        log "ERROR: Step 3 did not produce expected output file: $STEP3_PAF"
+        exit 1
+    fi
+    
+    # Step 4: Generate final assembly
+    run_step "Step 4: Generating final assembly" \
+        "\"$SCRIPT_DIR/test.sh\" \"$STEP3_PAF\" \"$FILTERED_TSV\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" --expected_telomere_length \"$EXPECTED_TELOMERE_LENGTH\" --length_threshold \"$LENGTH_THRESHOLD\" --phred_threshold \"$PHRED_THRESHOLD\""
+    
+    # Rename final output to something more descriptive
+    FINAL_OUTPUT="assemblmore_final_assembly.fasta"
+    if [ -f "final_assembly.fasta" ]; then
+        mv "final_assembly.fasta" "$FINAL_OUTPUT"
+        log "✓ Final assembly saved as: $FINAL_OUTPUT"
+    else
+        # Look for other potential output files from span_contigs.py
+        for possible_output in *.fasta; do
+            if [[ "$possible_output" != "$INITIAL_ASSEMBLY" && "$possible_output" != "assemblmore_final_assembly.fasta" ]]; then
+                mv "$possible_output" "$FINAL_OUTPUT"
+                log "✓ Final assembly saved as: $FINAL_OUTPUT"
+                break
+            fi
+        done
+    fi
+    
+    # Cleanup intermediate files if requested
+    cleanup
+    
+    log "✓ Pipeline completed successfully!"
+    log "Output files are located in: $(pwd)"
+    log "Key outputs:"
+    log "  - Contig placements: $FILTERED_TSV"
+    log "  - Initial refined assembly: $INITIAL_ASSEMBLY"
+    log "  - Final assembly: $FINAL_OUTPUT"
+    
+    # Generate summary statistics
+    if command -v seqkit &> /dev/null; then
+        log ""
+        log "Assembly statistics:"
+        log "Original assembly:"
+        seqkit stats "$REF_ABS" | tail -n +2
+        log "Final assembly:"
+        seqkit stats "$FINAL_OUTPUT" | tail -n +2
+    fi
+}
+
+# Set up trap for cleanup on exit
+trap 'cleanup' EXIT
+
+# Run main pipeline
+main "$@"
