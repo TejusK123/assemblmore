@@ -113,7 +113,9 @@ create_nx_plot <- function(nx_data, assembly_name, output_file) {
 create_comparative_nx_plot <- function(nx_data_list, output_file) {
   # Combine all NX data with assembly names
   combined_data <- data.frame()
+  assembly_names <- names(nx_data_list)
   colors <- rainbow(length(nx_data_list))
+  names(colors) <- assembly_names  # Name the colors vector to ensure proper mapping
   
   for (i in seq_along(nx_data_list)) {
     assembly_name <- names(nx_data_list)[i]
@@ -141,14 +143,14 @@ create_comparative_nx_plot <- function(nx_data_list, output_file) {
     ) +
     guides(color = guide_legend(title = "Assembly"))
   
-  # Add N50 lines for each assembly
-  for (i in seq_along(nx_data_list)) {
-    assembly_name <- names(nx_data_list)[i]
-    nx_data <- nx_data_list[[i]]
+  # Add N50 lines for each assembly with matching colors
+  for (assembly_name in assembly_names) {
+    nx_data <- nx_data_list[[assembly_name]]
     n50_value <- nx_data$NX[nx_data$X == 50]
+    assembly_color <- colors[assembly_name]  # Get color by name to ensure match
     
     p <- p + geom_hline(yintercept = n50_value, 
-                       linetype = "dashed", color = colors[i], alpha = 0.5)
+                       linetype = "dashed", color = assembly_color, alpha = 0.5)
   }
   
   ggsave(output_file, plot = p, width = 12, height = 8, dpi = 300)
