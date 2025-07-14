@@ -14,7 +14,7 @@ command_exists() {
 # Check for package managers
 if command_exists conda; then
     echo "Using conda to install dependencies..."
-    conda install -c bioconda minimap2 samtools seqkit -y
+    conda install -c bioconda minimap2 samtools seqkit merqury -y
     pip install numpy pandas biopython networkx more_itertools click
 elif command_exists brew; then
     echo "Using homebrew to install dependencies..."
