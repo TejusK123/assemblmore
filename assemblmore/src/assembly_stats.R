@@ -213,8 +213,11 @@ create_comparative_table <- function(results_list, output_file) {
 create_length_distribution_plot <- function(lengths_list, output_file) {
   # Prepare data for plotting
   combined_data <- data.frame()
-  
-  for (assembly_name in names(lengths_list)) {
+  assembly_names <- names(lengths_list)
+  colors <- rainbow(length(lengths_list))
+  names(colors) <- assembly_names  # Name the colors vector to ensure proper mapping
+
+  for (assembly_name in assembly_names) {
     lengths <- lengths_list[[assembly_name]]
     length_data <- data.frame(
       Length = lengths,
@@ -222,12 +225,13 @@ create_length_distribution_plot <- function(lengths_list, output_file) {
     )
     combined_data <- rbind(combined_data, length_data)
   }
-  
+
   # Create log-scale histogram
   p <- ggplot(combined_data, aes(x = Length, fill = Assembly)) +
     geom_histogram(alpha = 0.7, bins = 50, position = "identity") +
     scale_x_log10(labels = comma_format()) +
     scale_y_continuous(labels = comma_format()) +
+    scale_fill_manual(values = colors) +  # Add this line to use consistent colors
     labs(
       title = "Contig Length Distribution Comparison",
       x = "Contig Length (bp, log scale)",
