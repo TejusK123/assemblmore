@@ -178,7 +178,7 @@ echo "K-mer completeness: $COMPLETENESS ($COMPLETENESS_PERCENT%)"
 echo
 
 # Save results to file
-RESULTS_FILE="kmer_completeness_results.txt"
+RESULTS_FILE="kmer_completeness_${ASSEMBLY_BASENAME}_results.txt"
 cat > "$RESULTS_FILE" << EOF
 K-mer Completeness Analysis Results
 ===================================
