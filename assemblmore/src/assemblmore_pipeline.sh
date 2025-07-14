@@ -16,44 +16,55 @@ EXPECTED_TELOMERE_LENGTH=8000
 LENGTH_THRESHOLD=0
 PHRED_THRESHOLD=20
 
-# Function to print usage
 usage() {
     cat << EOF
-Usage: $0 [OPTIONS] <reference_genome.fasta> <assembly.fasta> <nanopore_reads.fasta>
-
-Improve genome assemblies using a multi-step pipeline that:
-1. Maps assembly contigs to reference genome
-2. Determines optimal contig placement and orientation
-3. Creates partially refined assembly
-4. Maps reads to refined assembly
-5. Produces final improved assembly
+Usage: $0 <reference_genome.fasta> <assembly.fasta> <nanopore_reads.fasta> [OPTIONS]
 
 REQUIRED ARGUMENTS:
-    reference_genome.fasta    Reference genome for initial mapping
-    assembly.fasta           Input assembly to be improved
-    nanopore_reads.fasta     Raw Nanopore reads
+  reference_genome.fasta  Path to reference genome (FASTA format)
+  assembly.fasta          Path to initial assembly (FASTA format)
+  nanopore_reads.fasta    Path to raw sequencing reads (FASTQ/FASTA format)
 
-OPTIONS:
-    -o, --output-dir DIR     Output directory (default: assemblmore_output)
-    -p, --preset1 PRESET     Minimap2 preset for step 1 (default: asm20)
-    -P, --preset2 PRESET     Minimap2 preset for step 3 (default: map-ont)
-    -N, --max-alignments N   Maximum alignments per read (default: 5)
-    -t, --telomere-length N  Expected telomere length (default: 8000) <ensure overestimation rather than underestimation>
-    -l, --length-threshold N Minimum read length threshold (default: 0)
-    -q, --phred-threshold N  Minimum Phred quality threshold (default: 20)
-    -k, --keep-intermediate  Keep intermediate files
-    -v, --verbose            Verbose output
-    -h, --help              Show this help message
+OPTIONAL ARGUMENTS:
+  --expected_telomere_length N    Expected telomere length (default: 8000)
+  --phred_threshold N             Phred quality threshold (default: 20)
+  --length_threshold N            Minimum contig length threshold (default: 0)
+  --output_dir DIR                Output directory (default: assemblmore_output)
+  --help                          Show this help message
+
+DESCRIPTION:
+  AssemblMore pipeline for genome assembly improvement through reference-guided
+  mapping, gap filling, read alignment, contig spanning, and telomere extension
+  with comparative analysis.
+
+PIPELINE STEPS:
+  1. Map assembly contigs to reference genome
+  2. Create initial refined assembly based on reference mapping
+  3. Map reads to refined assembly
+  4. Generate final assembly with contig spanning and gap filling
+  5. Comparative assembly statistics (original vs improved)
+
+OUTPUT:
+  The pipeline generates a comprehensive set of outputs including:
+  - Improved assembly: assemblmore_final_assembly.fasta
+  - Comparative NX plots and statistics showing improvement
+  - Assembly quality metrics and comparison tables
+  - Length distribution comparisons
+  - Detailed logs and intermediate files
+
+DEPENDENCIES:
+  Required: minimap2, samtools, paftools.js, python (with pandas, biopython, etc.)
+  Optional: R (with ggplot2, dplyr, readr, scales) for enhanced comparative statistics
 
 EXAMPLES:
-    # Basic usage
-    $0 reference.fasta assembly.fasta reads.fasta
-    
-    # With custom output directory and presets
-    $0 -o results -p asm10 -P map-hifi -t 10000 -q 30 reference.fasta assembly.fasta reads.fasta
-    
-    # Keep intermediate files for debugging
-    $0 -k -v reference.fasta assembly.fasta reads.fasta
+  # Basic usage
+  $0 reference.fasta assembly.fasta reads.fastq
+
+  # With custom parameters
+  $0 reference.fasta assembly.fasta reads.fastq --expected_telomere_length 10000 --phred_threshold 25
+
+  # Specify output directory
+  $0 reference.fasta assembly.fasta reads.fastq --output_dir my_results
 
 EOF
 }
@@ -101,6 +112,29 @@ check_dependencies() {
         log "ERROR: Missing required Python packages: ${missing_python[*]}"
         log "Install with: pip install numpy pandas biopython networkx more_itertools click"
         exit 1
+    fi
+    
+    # Check R and R packages (optional, but recommended for detailed stats)
+    if command -v Rscript &> /dev/null; then
+        local r_deps=("ggplot2" "dplyr" "readr" "scales")
+        local missing_r=()
+        
+        for dep in "${r_deps[@]}"; do
+            if ! Rscript -e "library($dep)" &> /dev/null; then
+                missing_r+=("$dep")
+            fi
+        done
+        
+        if [ ${#missing_r[@]} -ne 0 ]; then
+            log "WARNING: Missing R packages for detailed assembly statistics: ${missing_r[*]}"
+            log "Install with: R -e \"install.packages(c('ggplot2', 'dplyr', 'readr', 'scales'))\""
+            log "Will use basic statistics instead"
+        else
+            log "R and required packages found - will generate detailed assembly statistics"
+        fi
+    else
+        log "WARNING: R not found - will use basic assembly statistics only"
+        log "Install R and packages for comprehensive analysis"
     fi
     
     log "All required dependencies found"
@@ -194,7 +228,7 @@ run_step() {
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -o|--output-dir)
+        -o|--output-dir|--output_dir)
             OUTPUT_DIR="$2"
             shift 2
             ;;
@@ -210,15 +244,15 @@ while [[ $# -gt 0 ]]; do
             MAX_ALIGNMENTS="$2"
             shift 2
             ;;
-        -t|--telomere-length)
+        -t|--telomere-length|--expected_telomere_length)
             EXPECTED_TELOMERE_LENGTH="$2"
             shift 2
             ;;
-        -l|--length-threshold)
+        -l|--length-threshold|--length_threshold)
             LENGTH_THRESHOLD="$2"
             shift 2
             ;;
-        -q|--phred-threshold)
+        -q|--phred-threshold|--phred_threshold)
             PHRED_THRESHOLD="$2"
             shift 2
             ;;
@@ -374,14 +408,34 @@ main() {
     log "  - Initial refined assembly: $INITIAL_ASSEMBLY"
     log "  - Final assembly: $FINAL_OUTPUT"
     
-    # Generate summary statistics
-    if command -v seqkit &> /dev/null; then
+    # Generate comprehensive assembly statistics with comparison
+    if command -v Rscript &> /dev/null; then
         log ""
-        log "Assembly statistics:"
-        log "Original assembly:"
-        seqkit stats "$REF_ABS" | tail -n +2
-        log "Final assembly:"
-        seqkit stats "$FINAL_OUTPUT" | tail -n +2
+        log "Generating comprehensive assembly statistics with comparison..."
+        
+        # Run custom R script for comparative assembly analysis
+        run_step "Generating comparative assembly statistics" \
+            "Rscript \"$SCRIPT_DIR/assembly_stats.R\" \"$ASM_ABS:Original\" \"$(pwd)/$FINAL_OUTPUT:Improved\" \"$(pwd)/stats\""
+
+        log "Comparative assembly statistics saved in: $(pwd)/stats/"
+        log "  - Individual NX plots: stats/*_nx_plot.png"
+        log "  - Comparative NX plot: stats/comparative_nx_plot.png"
+        log "  - Assembly comparison table: stats/assembly_comparison.csv"
+        log "  - Length distribution comparison: stats/length_distribution_comparison.png"
+        log "  - Comprehensive summary: stats/assembly_analysis_summary.txt"
+    else
+        log "Rscript not found - skipping detailed assembly statistics"
+        log "Install R and required packages (ggplot2, dplyr, readr, scales) for comprehensive analysis"
+        
+        # Fallback to seqkit if available
+        if command -v seqkit &> /dev/null; then
+            log ""
+            log "Basic assembly statistics (seqkit):"
+            log "Original assembly:"
+            seqkit stats "$ASM_ABS" | tail -n +2
+            log "Final assembly:"
+            seqkit stats "$FINAL_OUTPUT" | tail -n +2
+        fi
     fi
 }
 

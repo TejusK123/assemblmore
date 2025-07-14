@@ -1,0 +1,532 @@
+#!/usr/bin/env Rscript
+
+# assembly_stats.R - Custom assembly statistics script
+# Computes contiguity, completeness, and correctness metrics for genome assemblies
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(dplyr)
+  library(readr)
+  library(scales)
+})
+
+# Function to read FASTA file and get sequence lengths
+read_fasta_lengths <- function(fasta_file) {
+  if (!file.exists(fasta_file)) {
+    stop(paste("FASTA file does not exist:", fasta_file))
+  }
+  
+  # Read FASTA file line by line
+  lines <- readLines(fasta_file)
+  
+  # Initialize variables
+  lengths <- c()
+  current_length <- 0
+  
+  for (line in lines) {
+    if (startsWith(line, ">")) {
+      # Header line - save previous sequence length if any
+      if (current_length > 0) {
+        lengths <- c(lengths, current_length)
+        current_length <- 0
+      }
+    } else {
+      # Sequence line - add to current length
+      current_length <- current_length + nchar(gsub("[^ACGTNacgtn]", "", line))
+    }
+  }
+  
+  # Don't forget the last sequence
+  if (current_length > 0) {
+    lengths <- c(lengths, current_length)
+  }
+  
+  return(lengths)
+}
+
+# Function to calculate NX values
+calculate_nx <- function(lengths, x_values = seq(1, 100, length.out = 10000)) {
+  # Sort lengths in descending order
+  sorted_lengths <- sort(lengths, decreasing = TRUE)
+  total_length <- sum(sorted_lengths)
+  
+  nx_values <- data.frame(
+    X = x_values,
+    NX = numeric(length(x_values))
+  )
+  
+  cumulative_length <- 0
+  length_index <- 1
+  
+  for (i in seq_along(x_values)) {
+    target_length <- total_length * (x_values[i] / 100)
+    
+    while (cumulative_length < target_length && length_index <= length(sorted_lengths)) {
+      cumulative_length <- cumulative_length + sorted_lengths[length_index]
+      length_index <- length_index + 1
+    }
+    
+    nx_values$NX[i] <- if (length_index > 1) sorted_lengths[length_index - 1] else 0
+  }
+  
+  return(nx_values)
+}
+
+# Function to calculate auN (area under the NX curve)
+calculate_aun <- function(lengths) {
+  sum_li_squared <- sum(lengths^2)
+  sum_li <- sum(lengths)
+  aun <- sum_li_squared / sum_li
+  return(aun)
+}
+
+# Function to create NX plot (single assembly)
+create_nx_plot <- function(nx_data, assembly_name, output_file) {
+  p <- ggplot(nx_data, aes(x = X, y = NX)) +
+    geom_line(color = "blue", linewidth = 1.5) +
+    scale_y_continuous(labels = comma_format()) +
+    labs(
+      title = paste("NX Plot for", assembly_name),
+      x = "X (%)",
+      y = "NX (bp)",
+      subtitle = paste("Assembly contiguity metrics")
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5, size = 10),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10)
+    ) +
+    geom_hline(yintercept = nx_data$NX[nx_data$X == 50], 
+               linetype = "dashed", color = "red", alpha = 0.7) +
+    annotate("text", 
+             x = 25, 
+             y = nx_data$NX[nx_data$X == 50] * 1.1, 
+             label = paste("N50 =", comma(nx_data$NX[nx_data$X == 50])), 
+             color = "red")
+  
+  ggsave(output_file, plot = p, width = 10, height = 6, dpi = 300)
+  cat("NX plot saved to:", output_file, "\n")
+}
+
+# Function to create comparative NX plot (multiple assemblies)
+create_comparative_nx_plot <- function(nx_data_list, output_file) {
+  # Combine all NX data with assembly names
+  combined_data <- data.frame()
+  colors <- rainbow(length(nx_data_list))
+  
+  for (i in seq_along(nx_data_list)) {
+    assembly_name <- names(nx_data_list)[i]
+    nx_data <- nx_data_list[[i]]
+    nx_data$Assembly <- assembly_name
+    combined_data <- rbind(combined_data, nx_data)
+  }
+  
+  p <- ggplot(combined_data, aes(x = X, y = NX, color = Assembly)) +
+    geom_line(linewidth = 1.2) +
+    scale_y_continuous(labels = comma_format()) +
+    scale_color_manual(values = colors) +
+    labs(
+      title = "Comparative NX Plot",
+      x = "X (%)",
+      y = "NX (bp)",
+      subtitle = "Assembly contiguity comparison"
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5, size = 10),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      legend.position = "bottom"
+    ) +
+    guides(color = guide_legend(title = "Assembly"))
+  
+  # Add N50 lines for each assembly
+  for (i in seq_along(nx_data_list)) {
+    assembly_name <- names(nx_data_list)[i]
+    nx_data <- nx_data_list[[i]]
+    n50_value <- nx_data$NX[nx_data$X == 50]
+    
+    p <- p + geom_hline(yintercept = n50_value, 
+                       linetype = "dashed", color = colors[i], alpha = 0.5)
+  }
+  
+  ggsave(output_file, plot = p, width = 12, height = 8, dpi = 300)
+  cat("Comparative NX plot saved to:", output_file, "\n")
+}
+
+# Function to calculate basic assembly statistics
+calculate_basic_stats <- function(lengths) {
+  stats <- list(
+    num_contigs = length(lengths),
+    total_length = sum(lengths),
+    mean_length = mean(lengths),
+    median_length = median(lengths),
+    min_length = min(lengths),
+    max_length = max(lengths),
+    std_length = sd(lengths)
+  )
+  return(stats)
+}
+
+# Function to create comparative statistics table
+create_comparative_table <- function(results_list, output_file) {
+  # Extract key metrics for comparison
+  comparison_data <- data.frame()
+  
+  for (assembly_name in names(results_list)) {
+    result <- results_list[[assembly_name]]
+    basic_stats <- result$contiguity_results$basic_stats
+    nx_data <- result$contiguity_results$nx_data
+    aun_value <- result$contiguity_results$aun
+    
+    row_data <- data.frame(
+      Assembly = assembly_name,
+      Num_Contigs = basic_stats$num_contigs,
+      Total_Length = basic_stats$total_length,
+      Mean_Length = round(basic_stats$mean_length),
+      Median_Length = basic_stats$median_length,
+      N10 = nx_data$NX[which.min(abs(nx_data$X - 10))],
+      N50 = nx_data$NX[which.min(abs(nx_data$X - 50))],
+      N90 = nx_data$NX[which.min(abs(nx_data$X - 90))],
+      auN = round(aun_value),
+      Max_Contig = basic_stats$max_length
+    )
+    
+    comparison_data <- rbind(comparison_data, row_data)
+  }
+  
+  # Save comparison table
+  write_csv(comparison_data, output_file)
+  cat("Comparative statistics saved to:", output_file, "\n")
+  
+  # Print comparison table to console
+  cat("\n=== ASSEMBLY COMPARISON TABLE ===\n")
+  print(comparison_data)
+  
+  return(comparison_data)
+}
+
+# Function to create length distribution comparison plot
+create_length_distribution_plot <- function(lengths_list, output_file) {
+  # Prepare data for plotting
+  combined_data <- data.frame()
+  
+  for (assembly_name in names(lengths_list)) {
+    lengths <- lengths_list[[assembly_name]]
+    length_data <- data.frame(
+      Length = lengths,
+      Assembly = assembly_name
+    )
+    combined_data <- rbind(combined_data, length_data)
+  }
+  
+  # Create log-scale histogram
+  p <- ggplot(combined_data, aes(x = Length, fill = Assembly)) +
+    geom_histogram(alpha = 0.7, bins = 50, position = "identity") +
+    scale_x_log10(labels = comma_format()) +
+    scale_y_continuous(labels = comma_format()) +
+    labs(
+      title = "Contig Length Distribution Comparison",
+      x = "Contig Length (bp, log scale)",
+      y = "Count",
+      subtitle = "Distribution of contig lengths across assemblies"
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+      plot.subtitle = element_text(hjust = 0.5, size = 10),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      legend.position = "bottom"
+    ) +
+    facet_wrap(~Assembly, scales = "free_y")
+  
+  ggsave(output_file, plot = p, width = 12, height = 8, dpi = 300)
+  cat("Length distribution plot saved to:", output_file, "\n")
+}
+
+# CONTIGUITY METRICS
+calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir) {
+  cat("\n=== CONTIGUITY METRICS FOR", assembly_name, "===\n")
+  
+  # Basic statistics
+  basic_stats <- calculate_basic_stats(lengths)
+  
+  cat("Basic Assembly Statistics:\n")
+  cat(sprintf("  Number of contigs: %s\n", comma(basic_stats$num_contigs)))
+  cat(sprintf("  Total length: %s bp\n", comma(basic_stats$total_length)))
+  cat(sprintf("  Mean length: %s bp\n", comma(round(basic_stats$mean_length))))
+  cat(sprintf("  Median length: %s bp\n", comma(basic_stats$median_length)))
+  cat(sprintf("  Min length: %s bp\n", comma(basic_stats$min_length)))
+  cat(sprintf("  Max length: %s bp\n", comma(basic_stats$max_length)))
+  cat(sprintf("  Std deviation: %s bp\n", comma(round(basic_stats$std_length))))
+  
+  # Calculate NX values
+  nx_data <- calculate_nx(lengths)
+  
+  cat("\nNX Values:\n")
+  for (i in 1:nrow(nx_data)) {
+    cat(sprintf("  N%f: %s bp\n", nx_data$X[i], comma(nx_data$NX[i])))
+  }
+  
+  # Calculate auN
+  aun_value <- calculate_aun(lengths)
+  cat(sprintf("\nauN (Area under NX curve): %s bp\n", comma(round(aun_value))))
+  
+  # Create NX plot
+  nx_plot_file <- file.path(output_dir, paste0(assembly_name, "_nx_plot.png"))
+  create_nx_plot(nx_data, assembly_name, nx_plot_file)
+  
+  # Save NX data to CSV
+  nx_csv_file <- file.path(output_dir, paste0(assembly_name, "_nx_values.csv"))
+  write_csv(nx_data, nx_csv_file)
+  cat("NX values saved to:", nx_csv_file, "\n")
+  
+  return(list(
+    basic_stats = basic_stats,
+    nx_data = nx_data,
+    aun = aun_value
+  ))
+}
+
+# COMPLETENESS METRICS (placeholder)
+calculate_completeness_metrics <- function(lengths, assembly_name, output_dir, reference_file = NULL) {
+  cat("\n=== COMPLETENESS METRICS ===\n")
+  cat("Placeholder for completeness analysis\n")
+  
+  # TODO: Implement completeness metrics such as:
+  # - BUSCO analysis for gene completeness
+  # - Comparison with reference genome (if provided)
+  # - Coverage analysis
+  # - Gap analysis
+  
+  if (!is.null(reference_file) && file.exists(reference_file)) {
+    cat("Reference genome provided:", reference_file, "\n")
+    # TODO: Compare assembly to reference
+    # - Calculate genome coverage
+    # - Identify missing regions
+    # - Calculate sequence identity
+  } else {
+    cat("No reference genome provided for completeness analysis\n")
+  }
+  
+  cat("Completeness analysis functions to be implemented here\n")
+  
+  return(list(
+    completeness_score = NA,
+    coverage_stats = NA,
+    missing_regions = NA
+  ))
+}
+
+# CORRECTNESS METRICS (placeholder)
+calculate_correctness_metrics <- function(lengths, assembly_name, output_dir, reference_file = NULL, reads_file = NULL) {
+  cat("\n=== CORRECTNESS METRICS ===\n")
+  cat("Placeholder for correctness analysis\n")
+  
+  # TODO: Implement correctness metrics such as:
+  # - Misassembly detection
+  # - Structural variant analysis
+  # - Read mapping quality analysis
+  # - Consensus accuracy
+  
+  if (!is.null(reference_file) && file.exists(reference_file)) {
+    cat("Reference genome provided for correctness analysis:", reference_file, "\n")
+    # TODO: Compare assembly to reference for correctness
+    # - Detect inversions, translocations, duplications
+    # - Calculate error rates
+    # - Identify problematic regions
+  }
+  
+  if (!is.null(reads_file) && file.exists(reads_file)) {
+    cat("Reads file provided for correctness analysis:", reads_file, "\n")
+    # TODO: Use reads for correctness assessment
+    # - Map reads back to assembly
+    # - Calculate mapping statistics
+    # - Identify regions with poor read support
+  }
+  
+  cat("Correctness analysis functions to be implemented here\n")
+  
+  return(list(
+    error_rate = NA,
+    misassemblies = NA,
+    structural_variants = NA
+  ))
+}
+
+# Main function
+main <- function() {
+  args <- commandArgs(trailingOnly = TRUE)
+  
+  if (length(args) < 1) {
+    cat("Usage: Rscript assembly_stats.R <assembly1.fasta:name1> [assembly2.fasta:name2] ... [output_dir]\n")
+    cat("\nArguments:\n")
+    cat("  assemblyX.fasta:nameX - Path to assembly FASTA file with optional name (format: path:name or just path)\n")
+    cat("  output_dir            - Optional: Output directory (default: current directory)\n")
+    cat("\nExamples:\n")
+    cat("  # Single assembly\n")
+    cat("  Rscript assembly_stats.R assembly.fasta:MyAssembly\n")
+    cat("  # Multiple assemblies for comparison\n")
+    cat("  Rscript assembly_stats.R original.fasta:Original improved.fasta:Improved output_dir\n")
+    cat("  # Using default names\n")
+    cat("  Rscript assembly_stats.R assembly1.fasta assembly2.fasta\n")
+    quit(status = 1)
+  }
+  
+  # Parse arguments
+  output_dir <- "."
+  assembly_inputs <- args
+  
+  # Check if last argument is output directory
+  # An argument is considered an output directory if:
+  # 1. It doesn't contain a colon (assembly:name format)
+  # 2. AND it doesn't end with fasta/fa/fna extensions
+  # 3. OR it exists as a directory
+  last_arg <- args[length(args)]
+  if (length(args) > 1 && 
+      (!grepl(":", last_arg) && !grepl("\\.(fasta|fa|fna)$", last_arg)) ||
+      (dir.exists(last_arg) && !grepl(":", last_arg))) {
+    output_dir <- last_arg
+    assembly_inputs <- args[-length(args)]
+  }
+  
+  cat("Parsed arguments:\n")
+  cat("  Assembly inputs:", paste(assembly_inputs, collapse = ", "), "\n")
+  cat("  Output directory:", output_dir, "\n\n")
+  
+  # Parse assembly files and names
+  assemblies <- list()
+  for (input in assembly_inputs) {
+    if (grepl(":", input)) {
+      # Format: path:name
+      parts <- strsplit(input, ":")[[1]]
+      assembly_file <- parts[1]
+      assembly_name <- parts[2]
+    } else {
+      # Format: just path, derive name from filename
+      assembly_file <- input
+      assembly_name <- tools::file_path_sans_ext(basename(assembly_file))
+    }
+    
+    # Check if assembly file exists
+    if (!file.exists(assembly_file)) {
+      cat("WARNING: Assembly file does not exist:", assembly_file, "\n")
+      next
+    }
+    
+    assemblies[[assembly_name]] <- assembly_file
+    cat("Added assembly:", assembly_name, "->", assembly_file, "\n")
+  }
+  
+  if (length(assemblies) == 0) {
+    cat("ERROR: No valid assembly files found\n")
+    quit(status = 1)
+  }
+  
+  # Create output directory if it doesn't exist
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  cat("Assembly Statistics Analysis\n")
+  cat("============================\n")
+  cat("Number of assemblies:", length(assemblies), "\n")
+  cat("Output directory:", output_dir, "\n\n")
+  
+  # Process each assembly
+  all_results <- list()
+  all_lengths <- list()
+  all_nx_data <- list()
+  
+  for (assembly_name in names(assemblies)) {
+    assembly_file <- assemblies[[assembly_name]]
+    cat("Processing assembly:", assembly_name, "(", assembly_file, ")\n")
+    
+    # Read assembly lengths
+    lengths <- read_fasta_lengths(assembly_file)
+    cat("Found", length(lengths), "sequences\n")
+    
+    # Store lengths for comparison
+    all_lengths[[assembly_name]] <- lengths
+    
+    # Calculate metrics
+    contiguity_results <- calculate_contiguity_metrics(lengths, assembly_name, output_dir)
+    completeness_results <- calculate_completeness_metrics(lengths, assembly_name, output_dir, NULL)
+    correctness_results <- calculate_correctness_metrics(lengths, assembly_name, output_dir, NULL, NULL)
+    
+    # Store results
+    all_results[[assembly_name]] <- list(
+      contiguity_results = contiguity_results,
+      completeness_results = completeness_results,
+      correctness_results = correctness_results
+    )
+    
+    # Store NX data for comparison
+    all_nx_data[[assembly_name]] <- contiguity_results$nx_data
+    
+    cat("\n" , rep("=", 50), "\n")
+  }
+  
+  # Generate comparative analyses if multiple assemblies
+  if (length(assemblies) > 1) {
+    cat("\n=== GENERATING COMPARATIVE ANALYSES ===\n")
+    
+    # Create comparative NX plot
+    comparative_nx_file <- file.path(output_dir, "comparative_nx_plot.png")
+    create_comparative_nx_plot(all_nx_data, comparative_nx_file)
+    
+    # Create comparative statistics table
+    comparative_table_file <- file.path(output_dir, "assembly_comparison.csv")
+    comparison_data <- create_comparative_table(all_results, comparative_table_file)
+    
+    # Create length distribution comparison
+    length_dist_file <- file.path(output_dir, "length_distribution_comparison.png")
+    create_length_distribution_plot(all_lengths, length_dist_file)
+    
+    cat("\nComparative analysis complete!\n")
+  }
+  
+  # Save comprehensive summary
+  summary_file <- file.path(output_dir, "assembly_analysis_summary.txt")
+  sink(summary_file)
+  cat("Assembly Statistics Summary\n")
+  cat("==========================\n")
+  cat("Generated on:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
+  cat("Number of assemblies analyzed:", length(assemblies), "\n\n")
+  
+  for (assembly_name in names(all_results)) {
+    result <- all_results[[assembly_name]]
+    basic_stats <- result$contiguity_results$basic_stats
+    nx_data <- result$contiguity_results$nx_data
+    aun_value <- result$contiguity_results$aun
+    
+    cat("ASSEMBLY:", assembly_name, "\n")
+    cat("Number of contigs:", comma(basic_stats$num_contigs), "\n")
+    cat("Total length:", comma(basic_stats$total_length), "bp\n")
+    cat("N50:", comma(nx_data$NX[which.min(abs(nx_data$X - 50))]), "bp\n")
+    cat("auN:", comma(round(aun_value)), "bp\n\n")
+  }
+  
+  if (length(assemblies) > 1) {
+    cat("COMPARATIVE FILES GENERATED:\n")
+    cat("- Comparative NX plot: comparative_nx_plot.png\n")
+    cat("- Assembly comparison table: assembly_comparison.csv\n")
+    cat("- Length distribution comparison: length_distribution_comparison.png\n")
+  }
+  
+  sink()
+  
+  cat("\nAnalysis complete!\n")
+  cat("Summary saved to:", summary_file, "\n")
+  
+  if (length(assemblies) > 1) {
+    cat("\nComparative analyses generated for", length(assemblies), "assemblies\n")
+    cat("Check the output directory for comparative plots and statistics\n")
+  }
+}
+
+# Run main function
+if (!interactive()) {
+  main()
+}
