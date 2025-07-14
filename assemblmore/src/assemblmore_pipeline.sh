@@ -380,7 +380,7 @@ main() {
     
     # Step 4: Generate final assembly
     run_step "Step 4: Generating final assembly" \
-        "\"$SCRIPT_DIR/test.sh\" \"$STEP3_PAF\" \"$FILTERED_TSV\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" --expected_telomere_length \"$EXPECTED_TELOMERE_LENGTH\" --length_threshold \"$LENGTH_THRESHOLD\" --phred_threshold \"$PHRED_THRESHOLD\""
+        "\"$SCRIPT_DIR/span_contigs.sh\" \"$STEP3_PAF\" \"$FILTERED_TSV\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" --expected_telomere_length \"$EXPECTED_TELOMERE_LENGTH\" --length_threshold \"$LENGTH_THRESHOLD\" --phred_threshold \"$PHRED_THRESHOLD\""
     
     # Rename final output to something more descriptive
     FINAL_OUTPUT="assemblmore_final_assembly.fasta"
