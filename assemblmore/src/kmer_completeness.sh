@@ -122,14 +122,24 @@ echo
 
 # Step 4: Calculate difference (k-mers in reads but not in assembly)
 echo "Step 4: Calculating k-mers missing from assembly..."
-DIFFERENCE_MERYL="$TMP_DIR/missing_kmers.meryl"
-meryl difference "$RAW_READS_MERYL" "$ASSEMBLY_MERYL" output "$DIFFERENCE_MERYL"
+READS_DIFF_ASSEMBLY="$TMP_DIR/missing_kmers.meryl"
+meryl difference "$RAW_READS_MERYL" "$ASSEMBLY_MERYL" output "$READS_DIFF_ASSEMBLY"
 if [ $? -ne 0 ]; then
     echo "Error: Failed to calculate k-mer difference"
     exit 1
 fi
-echo "Missing k-mers database created: $DIFFERENCE_MERYL"
+echo "Missing k-mers database created: $READS_DIFF_ASSEMBLY"
 echo
+
+ASSEMBLY_DIFF_READS="$TMP_DIR/assembly_missing_kmers.meryl"
+meryl difference "$ASSEMBLY_MERYL" "$RAW_READS_MERYL" output "$ASSEMBLY_DIFF_READS"
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to calculate k-mers missing from reads"
+    exit 1
+fi
+echo "Assembly missing k-mers database created: $ASSEMBLY_DIFF_READS"
+echo
+
 
 # Step 5: Calculate intersection-sum (k-mers present in both)
 echo "Step 5: Calculating k-mers present in both reads and assembly..."
@@ -153,7 +163,7 @@ if [ -z "$X1" ]; then
 fi
 
 # Extract statistics for missing k-mers (x2)  
-X2=$(meryl statistics "$DIFFERENCE_MERYL" | head -n4 | tail -n1 | awk '{print $2}')
+X2=$(meryl statistics "$READS_DIFF_ASSEMBLY" | head -n4 | tail -n1 | awk '{print $2}')
 if [ -z "$X2" ]; then
     echo "Error: Could not extract missing k-mer count"
     exit 1
@@ -169,12 +179,30 @@ fi
 COMPLETENESS=$(echo "scale=6; $X1 / ($X1 + $X2)" | bc -l)
 COMPLETENESS_PERCENT=$(echo "scale=2; $COMPLETENESS * 100" | bc -l)
 
+
+X3=$(meryl statistics "$ASSEMBLY_DIFF_READS" | head -n4 | tail -n1 | awk '{print $2}')
+if [ -z "$X3" ]; then
+    echo "Error: Could not extract assembly missing k-mer count"
+    exit 1
+fi
+
+X4=$(meryl statistics "$ASSEMBLY_MERYL" | head -n4 | tail -n1 | awk '{print $2}')
+if [ -z "$X4" ]; then
+    echo "Error: Could not extract total k-mer count in assembly"
+    exit 1
+fi
+
+ERROR=$(echo "$X3 $X4" | awk -v k=$OPTIMAL_K '{print (1-(1-$1/$2)^(1/k))}')
+QV=$(echo "$X3 $X4" | awk -v k=$OPTIMAL_K '{print (-10*log(1-(1-$1/$2)^(1/k))/log(10))}')
+
 echo "=== K-mer Completeness Results ==="
 echo "K-mer size used: $OPTIMAL_K"
 echo "Shared k-mers (present in both): $X1"
 echo "Missing k-mers (in reads only): $X2"
 echo "Total k-mers in reads: $TOTAL_KMERS"
 echo "K-mer completeness: $COMPLETENESS ($COMPLETENESS_PERCENT%)"
+echo "Error Rate: $ERROR"
+echo "Quality Value (QV): $QV"
 echo
 
 # Save results to file
@@ -195,11 +223,20 @@ Missing k-mers (in reads but not assembly): $X2
 Total k-mers in reads: $TOTAL_KMERS
 K-mer completeness: $COMPLETENESS ($COMPLETENESS_PERCENT%)
 
+Error Rate: $ERROR
+Quality Value (QV): $QV
+
 Interpretation:
 --------------
-This metric represents the fraction of k-mers from the raw reads
+Completeness:
+The k-mer completeness metric represents the fraction of k-mers from the raw reads
 that are also present in the assembly. Higher values indicate
 better assembly completeness.
+
+Correctness:
+The error rate is calculated based on the k-mers present in the assembly but not in the reads.
+The QV score is derived from the error rate, providing a logarithmic scale of quality.
+A higher QV indicates better assembly quality.
 EOF
 
 echo "Results saved to: $RESULTS_FILE"
