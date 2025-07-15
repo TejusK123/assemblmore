@@ -15,6 +15,7 @@ VERBOSE=false
 EXPECTED_TELOMERE_LENGTH=8000
 LENGTH_THRESHOLD=0
 PHRED_THRESHOLD=20
+SKIP_BAM=false
 
 usage() {
     cat << EOF
@@ -30,6 +31,7 @@ OPTIONAL ARGUMENTS:
   --phred_threshold N             Phred quality threshold (default: 20)
   --length_threshold N            Minimum contig length threshold (default: 0)
   --output_dir DIR                Output directory (default: assemblmore_output)
+  --skip_bam                      Skip BAM file generation (only generate PAF files)
   --help                          Show this help message
 
 DESCRIPTION:
@@ -62,6 +64,9 @@ EXAMPLES:
 
   # With custom parameters
   $0 reference.fasta assembly.fasta reads.fastq --expected_telomere_length 10000 --phred_threshold 25
+
+  # Skip BAM generation for faster processing
+  $0 reference.fasta assembly.fasta reads.fastq --skip_bam
 
   # Specify output directory
   $0 reference.fasta assembly.fasta reads.fastq --output_dir my_results
@@ -202,7 +207,10 @@ cleanup() {
         # Remove intermediate files but keep final outputs
         find "$OUTPUT_DIR" -name "*.sam" -delete 2>/dev/null || true
         find "$OUTPUT_DIR" -name "*_mapped_to_*.sorted.paf" -not -name "final_*" -delete 2>/dev/null || true
-        find "$OUTPUT_DIR" -name "*_mapped_to_*.sorted.bam*" -delete 2>/dev/null || true
+        # Only remove BAM files if they were generated (i.e., SKIP_BAM is false)
+        if [ "$SKIP_BAM" = false ]; then
+            find "$OUTPUT_DIR" -name "*_mapped_to_*.sorted.bam*" -delete 2>/dev/null || true
+        fi
     else
         log "Keeping all intermediate files as requested"
     fi
@@ -258,6 +266,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -k|--keep-intermediate)
             KEEP_INTERMEDIATE=true
+            shift
+            ;;
+        --skip-bam|--skip_bam)
+            SKIP_BAM=true
             shift
             ;;
         -v|--verbose)
@@ -322,10 +334,15 @@ main() {
     REF_BASE=$(basename "$REF_ABS" | sed 's/\.\(fasta\|fa\|fna\)$//')
     ASM_BASE=$(basename "$ASM_ABS" | sed 's/\.\(fasta\|fa\|fna\)$//')
     READS_BASE=$(basename "$READS_ABS" | sed 's/\.\(fastq\|fq\|fasta\|fa\)$//')
-    
+
+    log "$REF_BASE"
+    log "$ASM_BASE"
+    log "$READS_BASE"
+
     log_verbose "Reference base name: $REF_BASE"
     log_verbose "Assembly base name: $ASM_BASE"
     log_verbose "Reads base name: $READS_BASE"
+    log_verbose "Skip BAM generation: $SKIP_BAM"
     #log_verbose "PAF file: $STEP1_PAF"
     #log_verbose "Actual reference base (from PAF): $ACTUAL_REF_BASE"
     log_verbose "Expected telomere length: $EXPECTED_TELOMERE_LENGTH"
@@ -334,9 +351,13 @@ main() {
     
     # Step 1: Map assembly contigs to reference genome
     STEP1_PAF="${ASM_BASE}_mapped_to_${REF_BASE}.sorted.paf"
+    BAM_FLAG=""
+    if [ "$SKIP_BAM" = true ]; then
+        BAM_FLAG="--no-bam"
+    fi
     run_step "Step 1: Mapping assembly contigs to reference" \
-        "\"$SCRIPT_DIR/fill_gaps.sh\" \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
-    
+        "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
+
     if [ ! -f "$STEP1_PAF" ]; then
         log "ERROR: Step 1 did not produce expected output file: $STEP1_PAF"
         exit 1
@@ -371,7 +392,7 @@ main() {
     INITIAL_BASE="ordered_and_oriented_to_${ACTUAL_REF_BASE}_assembly"
     STEP3_PAF="${READS_BASE}_mapped_to_${INITIAL_BASE}.sorted.paf"
     run_step "Step 3: Mapping reads to refined assembly" \
-        "\"$SCRIPT_DIR/fill_gaps.sh\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" \"$MAP_PRESET_2\" \"$MAX_ALIGNMENTS\""
+        "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" \"$MAP_PRESET_2\" \"$MAX_ALIGNMENTS\""
     
     if [ ! -f "$STEP3_PAF" ]; then
         log "ERROR: Step 3 did not produce expected output file: $STEP3_PAF"

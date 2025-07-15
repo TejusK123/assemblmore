@@ -1,9 +1,41 @@
 #!/bin/bash
 
-CONTIG=$1
-ONT_READS=$2
-MAP_PRESET="${3:-map-ont}"
-MAX_ALIGNMENTS="${4:-5}"
+# CONTIG=$1
+# ONT_READS=$2
+# MAP_PRESET="${3:-map-ont}"
+# MAX_ALIGNMENTS="${4:-5}"
+
+MAKE_BAM=true
+
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            echo "Usage: $0 [OPTIONS] <contig_fasta> <ont_reads_fastq> [map_preset] [max_alignments]"
+            echo "Example: $0 contig.fasta reads.fastq map-ont 5"
+            exit 0
+            ;;
+        -b|--no-bam|--no_bam)
+            MAKE_BAM=false
+            ;;
+
+        -*|--*)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [OPTIONS] <contig_fasta> <ont_reads_fastq> [map_preset] [max_alignments]"
+            exit 1
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            ;;
+    esac
+    shift
+done
+
+
+CONTIG="${POSITIONAL_ARGS[0]}"
+ONT_READS="${POSITIONAL_ARGS[1]}"
+MAP_PRESET="${POSITIONAL_ARGS[2]:-map-ont}"
+MAX_ALIGNMENTS="${POSITIONAL_ARGS[3]:-5}"
 
 if [ -z "$CONTIG" ] || [ -z "$ONT_READS" ]; then
     echo "Usage: $0 <contig_fasta> <ont_reads_fastq>"
@@ -56,10 +88,16 @@ awk 'FNR==NR && !/^@/ {a[++i]=$6; next} {$18=a[++j]}1' "${basename_reads}_mapped
 mv check.paf "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.paf"
 
 
-# Convert SAM to BAM
-samtools view -bS "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.sam" > "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.bam"
-# Index the BAM file
-samtools index "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.bam"
+if [ "$MAKE_BAM" = true ]; then
+    echo "Converting SAM to BAM and indexing..."
+    # Convert SAM to BAM
+    samtools view -bS "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.sam" > "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.bam"
+    # Index the BAM file
+    samtools index "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.bam"
+else
+    echo "Skipping BAM conversion as per user request."
+fi
+
 # Clean up the sorted SAM file
 rm "${basename_reads}_mapped_to_${basename_contig%.fasta}.sorted.sam"
 # Print completion message
