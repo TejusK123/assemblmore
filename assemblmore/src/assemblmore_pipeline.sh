@@ -350,13 +350,22 @@ main() {
     log_verbose "Phred threshold: $PHRED_THRESHOLD"
     
     # Step 1: Map assembly contigs to reference genome
+    REF_BASE="${REF_BASE%.fasta}"
+    REF_BASE="${REF_BASE%.fa}"
+    REF_BASE="${REF_BASE%.fna}"
+
     STEP1_PAF="${ASM_BASE}_mapped_to_${REF_BASE}.sorted.paf"
     BAM_FLAG=""
     if [ "$SKIP_BAM" = true ]; then
         BAM_FLAG="--no-bam"
     fi
-    run_step "Step 1: Mapping assembly contigs to reference" \
-        "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
+
+    if [ ! -f "$STEP1_PAF" ]; then
+        run_step "Step 1: Mapping assembly contigs to reference" \
+            "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
+    else
+        log "Skipping Step 1: PAF file already exists: $STEP1_PAF"
+    fi
 
     if [ ! -f "$STEP1_PAF" ]; then
         log "ERROR: Step 1 did not produce expected output file: $STEP1_PAF"
@@ -391,8 +400,13 @@ main() {
     # Step 3: Map reads to the partially refined assembly
     INITIAL_BASE="ordered_and_oriented_to_${ACTUAL_REF_BASE}_assembly"
     STEP3_PAF="${READS_BASE}_mapped_to_${INITIAL_BASE}.sorted.paf"
+    
+    if [ ! -f "$STEP3_PAF" ]; then
     run_step "Step 3: Mapping reads to refined assembly" \
         "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" \"$MAP_PRESET_2\" \"$MAX_ALIGNMENTS\""
+    else
+        log "Skipping Step 3: PAF file already exists: $STEP3_PAF"
+    fi
     
     if [ ! -f "$STEP3_PAF" ]; then
         log "ERROR: Step 3 did not produce expected output file: $STEP3_PAF"

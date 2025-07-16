@@ -13,13 +13,13 @@ Implement logic to handle these cases.
 
 '''
 
+
 def get_readlength_stats(reads_file):
     print(f"Reading read lengths from: {reads_file}")
     read_lengths = (len(record.seq) for record in SeqIO.parse(reads_file, "fasta"))
     stats = pd.Series(read_lengths).describe()
     print(f"Read length stats:\n{stats}")
     return stats
-
 
 
 def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phred_threshold=40, overlap_fraction=0.25, matched_base_threshold=15000):
@@ -81,9 +81,12 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
             #valid_extension = most_contiguous['contig_length'] - matched_len
             #start_threshold = most_contiguous_start - valid_extension
             #end_threshold = most_contiguous_end + valid_extension
-            
-            
-            poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) & (poi_df['chr_map_end'] <= end_threshold)]
+
+
+            poi_df = poi_df[(poi_df['chr_map_start'] >= start_threshold) | (poi_df['chr_map_end'] <= end_threshold)]
+            # Latest edit: Changed to OR condition to allow for more flexible filtering all that really needs to get filtered out are the mappings that
+            # are insanely far away from the most contiguous mapping.
+            # This allows for frame-shift stuff that might've happened with minimap.
         ################################
 
         ############# Calculate strand mode using a weighted approach
@@ -91,6 +94,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
             matched_total = poi_df['matched_total'].sum()
             length_ratio_series = (poi_df['contig_map_end'] - poi_df['contig_map_start']) / matched_total
             criterion = (poi_df['strand'].apply(lambda x: strand_map[x] if x in strand_map else np.nan) @ length_ratio_series)
+            # Calculate the weighted mode based on strand and length ratio
             if criterion >= 0:
                 strand_modes.append('+')
             else:
@@ -146,6 +150,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
                 len1 = item['max_chr_map_end'] - item['min_chr_map_start'] + 1
                 len2 = other_item['max_chr_map_end'] - other_item['min_chr_map_start'] + 1
                 # Require overlap to be greater than fraction overlap_fraction of either contig's mapped region
+                #print(f"{item['contig']}-{other_item['contig']} {(item['min_chr_map_start'], item['max_chr_map_end'])} {(other_item['min_chr_map_start'], other_item['max_chr_map_end'])}\n(overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")
                 if ((overlap / len1) > overlap_fraction or (overlap / len2) > 0.1):
 
                     print(f"{item['contig']}-{other_item['contig']} {(item['min_chr_map_start'], item['max_chr_map_end'])} {(other_item['min_chr_map_start'], other_item['max_chr_map_end'])}\n(overlap_ratio_left_to_right: {overlap/len1}, overlap_ratio_right_to_left: {overlap/len2})")

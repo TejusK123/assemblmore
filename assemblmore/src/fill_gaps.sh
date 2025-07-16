@@ -70,7 +70,9 @@ fi
 basename_contig="${CONTIG##*/}"
 basename_reads="${ONT_READS##*/}"
 
-
+basename_contig="${basename_contig%.fasta}"
+basename_contig="${basename_contig%.fa}"
+basename_contig="${basename_contig%.fna}"
 
 echo "Mapping ONT reads to contig: $basename_contig"
 echo "Using ONT reads from: $ONT_READS"

@@ -271,8 +271,11 @@ calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir) {
   nx_data <- calculate_nx(lengths)
   
   cat("\nNX Values:\n")
+  step_size <- 1000
   for (i in 1:nrow(nx_data)) {
-    cat(sprintf("  N%f: %s bp\n", nx_data$X[i], comma(nx_data$NX[i])))
+    if (i %% step_size == 0){
+      cat(sprintf("  N%f: %s bp\n", nx_data$X[i], comma(nx_data$NX[i])))
+    }
   }
   
   # Calculate auN
