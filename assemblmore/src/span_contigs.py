@@ -7,8 +7,120 @@ import sys
 from copy import deepcopy
 import os
 import click
-
+import os
+import subprocess
 #import re
+
+
+
+def combine_contigs(arr: list, reads, contigs) -> list:
+    print("[DEBUG] Combining contigs for a chromosome...")
+
+    read_ids = [item.id for item in reads]
+    read_seqs = [item.seq for item in reads]
+    contig_ids = [item.id for item in contigs]
+    contig_seqs = [item.seq for item in contigs]
+
+    ################################## This has a logical error, if compound merges this breaks.
+    def inter_contig_merge(str1, str2, series_rules):
+        print("[DEBUG] Running inter_contig_merge...")
+        if not isinstance(str1, str):
+            l_str = str1
+            base_x = len(l_str) - series_rules['7_x'] + series_rules['8_x'] #If str1 is SeqIO object, that means it has been merged to some extent and the indices stored in '8_x' are incorrect.
+            
+        else:
+            l_str = contig_seqs[contig_ids.index(str1)]
+            base_x = series_rules['8_x']
+        #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
+        if not isinstance(str2, str):
+            r_str = str2
+        else:
+            r_str = contig_seqs[contig_ids.index(str2)]
+        #^^^^ If inter merge is used, str2 is a Bio.Seq.Seq object
+
+
+        base_y = series_rules['7_y']
+        #print(f"[DEBUG] base_x: {base_x}, base_y: {base_y}, str1: {str1}, str2: {str2}")
+
+        x_prime = series_rules['3_x']
+        y_prime = series_rules['2_y']
+        
+
+        if series_rules['criterion'] < 0:
+            x = base_x - (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the left contig, not the right one.
+            y = base_y + (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the right contig, not the left one.
+            x_prime, y_prime = y_prime, x_prime 
+        else:
+            x = base_x
+            y = base_y
+
+        mid_str = read_seqs[read_ids.index(series_rules[0])]
+        
+
+        #print(f"[DEBUG] {series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
+        
+
+        return(l_str[:x] + mid_str[x_prime + 1:y_prime] + r_str[y:])      #<----not sure +1 or not, but it is not important now. Also read mismatches at ends not accounted for yet.
+
+    ##################################
+
+    def telomere_merge(str1, series_rules, left = True):
+        """
+        Merges the contig with the telomere using the best spanning read.
+        """
+        print(f"[DEBUG] Running telomere_merge ({'left' if left else 'right'})...")
+        if not isinstance(str1, str):
+            rel_str = str1
+        else:
+            rel_str = contig_seqs[contig_ids.index(str1)]
+        #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object, otherwise it is a string.
+
+        telo_str = read_seqs[read_ids.index(series_rules[0])]
+
+        if left:
+            x = series_rules[2]
+            #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
+            return telo_str[:x] + rel_str
+        else:
+            y = series_rules[3]
+            #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
+            return rel_str + telo_str[y + 1:]
+
+    
+    i = 1
+    while i < len(arr) - 2:
+        #print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
+        s1 = arr[i]
+        s2 = arr[i + 2]
+        merge_rule = arr[i + 1]
+
+        if isinstance(merge_rule, pd.Series):
+            #print(f"[DEBUG] Performing inter-contig merge between {s1} and {s2}...")
+            merged = inter_contig_merge(s1, s2, merge_rule)
+            # Replace s1 and s2 with merged string
+            arr[i] = merged
+            # Remove merge rule and s2
+            del arr[i + 1:i + 3]
+            # Step back to try more merges with new merged result
+            i = max(i - 2, 1)
+        else:
+            i += 2
+    
+
+    
+    # Handle telomere merges
+    if isinstance(arr[0], pd.Series):
+        #print("[DEBUG] Performing left telomere merge...")
+        arr[0] = telomere_merge(arr[1], arr[0], left=True)
+        del arr[1]
+    if isinstance(arr[-1], pd.Series):
+        #print("[DEBUG] Performing right telomere merge...")
+        arr[-1] = telomere_merge(arr[-2], arr[-1], left=False)
+        del arr[-2]
+    
+    
+    return(arr)
+
 
 def get_readlength_stats(reads_file):
     print(f"[DEBUG] Reading read lengths from: {reads_file}")
@@ -110,81 +222,209 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
 
 
 failure_count = 0
-def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0) -> List[str]:
+def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads, contigs, reads_file, phred_threshold: int = 10, length_threshold: int = 0, enable_extension: bool = True) -> List[str]:
     print("[DEBUG] Running simple_contig_span...") 
-    def find_best_read(merged_alignments: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0) -> pd.Series:
-        
-        #print(f"This is the input {merged_alignments}")
+    read_ids = [item.id for item in reads]
+    read_seqs = [item.seq for item in reads]
+    contig_ids = [item.id for item in contigs]
+    contig_seqs = [item.seq for item in contigs]
 
-        if not isinstance(merged_alignments, pd.DataFrame):
+
+    def find_best_read(merged_alignments: pd.DataFrame, whole_alignments: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0, max_iterations: int = 3, enable_extension: bool = True) -> pd.Series:  
+        """
+        Find the best spanning read with iterative contig extension if needed.
+        
+        Args:
+            merged_alignments: DataFrame with merged alignment data
+            whole_alignments: Full alignments DataFrame for extension search
+            phred_threshold: Minimum quality threshold
+            length_threshold: Minimum read length threshold  
+            max_iterations: Maximum number of extension iterations to attempt
+            enable_extension: Whether to perform computationally expensive contig extensions
             
+        Returns:
+            Best spanning read as pandas Series or fallback contig name
+        """
+        global failure_count
+        
+        if not isinstance(merged_alignments, pd.DataFrame):
             print(f"[DEBUG] Warning: Empty alignment found between {merged_alignments[0]} and {merged_alignments[1]}. Skipping.")
-            #global failure_count
-            #failure_count += 1
             return merged_alignments[1]
         
-          # Return the right end of the alignment as a fallback
-        # def get_clip_length(x: str) -> int:
-        #     """
-        #     Gets Hard/Soft clip length from the PAF file format.
-        #     Returns the length of the clip if it exists, otherwise returns 0.
-        #     """
-        #     num = re.split('S|H', x)[0]
-        #     return int(num) if num.isdigit() else 0
+        # Store original contigs for reference
+        original_left_contig = merged_alignments['5_x'].values[0]
+        original_right_contig = merged_alignments['5_y'].values[0]
+        current_merged_alignments = merged_alignments
         
-        print(f"[DEBUG] Finding best spanning read for {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}")
-        points_of_interest = merged_alignments[(merged_alignments['1_x'] >= length_threshold)
-                                               & (merged_alignments['6_x'] - merged_alignments['8_x'] < 100)
-                                               & (merged_alignments['7_y'] < 100)
-                                               #Above conditions are variable for potential branch and bound algorithm
-                                               #Below conditions are fixed:
-                                               & (merged_alignments['4_x'] == '+') 
-                                               & (merged_alignments['4_y'] == '+')
-                                               & (merged_alignments['11_x'] >= phred_threshold) #| (merged_alignments['11_y'] >= 60))
-                                               & (merged_alignments['11_y'] >= phred_threshold)
-                                                
-                                               #& (merged_alignments['2_y'] > merged_alignments['3_x'])
-                                               ].copy()
-
-        #points_of_interest['criterion'] = points_of_interest['17_y'].apply(get_clip_length)
-        points_of_interest['criterion'] = points_of_interest['2_y'] - points_of_interest['3_x']
-
-        dup_chroms = [idx for idx, item in orderings['chr'].items() if orderings['chr'].tolist().count(item) > 1]
-        chrom_windows = [list(item[1].itertuples()) for item in list(orderings.groupby('chr', sort=False))]
-
-
-
-        #print(chrom_windows[i])
-        def get_expected_gap_sizes(chr: List[pd.Series]) -> List[int]:
-            res = []
-
-            p1 = 0
-            p2 = 1
-
-            while p2 < len(chr):
-                #print(f"Comparing {chr[p2][4]} and {chr[p1][5]}")
-                res.append((chr[p1][1], chr[p2][1], chr[p2][4] - chr[p1][5]))
-                p1 += 1
-                p2 += 1
-            return res
+        print(f"[DEBUG] Finding best spanning read for {original_left_contig} and {original_right_contig}")
         
-        expected_gap_sizes = [get_expected_gap_sizes(item) for item in chrom_windows]
-        #for item in expected_gap_sizes:
-            #print(f"[DEBUG] Expected gap sizes: {item}")
+        # Iterative approach instead of recursion
+        for iteration in range(max_iterations):
+            print(f"[DEBUG] Iteration {iteration + 1}/{max_iterations}: Finding best read...")
+            
+            # Define relaxation parameters for inner iterations
+            relaxation_steps = [
+                # Step 0: Original strict conditions
+                {"gap_threshold_x": 100, "gap_threshold_y": 100, "phred_factor": 1.0},
+                # Step 1: Relax gap thresholds
+                {"gap_threshold_x": 1000, "gap_threshold_y": 1000, "phred_factor": 1.0},
+                # Step 2: Further relax gap thresholds and slightly lower phred
+                {"gap_threshold_x": 5000, "gap_threshold_y": 5000, "phred_factor": 1.0},
+                # Step 3: Most relaxed conditions before extension
+                {"gap_threshold_x": 10000, "gap_threshold_y": 10000, "phred_factor": 1.0}
+            ]
+            
+            # Try progressively relaxed conditions before attempting extension
+            for relax_step, params in enumerate(relaxation_steps):
+                print(f"[DEBUG] Iteration {iteration + 1}, relaxation step {relax_step + 1}: gap_x<{params['gap_threshold_x']}, gap_y<{params['gap_threshold_y']}, phred*{params['phred_factor']}")
+                
+                adjusted_phred = int(phred_threshold * params['phred_factor'])
+                
+                # Try to find spanning read with current relaxed conditions
+                points_of_interest = current_merged_alignments[(current_merged_alignments['1_x'] >= length_threshold)
+                                                       & (current_merged_alignments['6_x'] - current_merged_alignments['8_x'] < params['gap_threshold_x'])
+                                                       & (current_merged_alignments['7_y'] < params['gap_threshold_y'])
+                                                       #Above conditions are variable for potential branch and bound algorithm
+                                                       #Below conditions are fixed:
+                                                       & (current_merged_alignments['4_x'] == '+') 
+                                                       & (current_merged_alignments['4_y'] == '+')
+                                                       & (current_merged_alignments['11_x'] >= adjusted_phred)
+                                                       & (current_merged_alignments['11_y'] >= adjusted_phred)
+                                                        
+                                                       #& (merged_alignments['2_y'] > merged_alignments['3_x'])
+                                                       ].copy()
 
-        #print(expected_gap_sizes)
-        try:
+                #points_of_interest['criterion'] = points_of_interest['17_y'].apply(get_clip_length)
+                points_of_interest['criterion'] = points_of_interest['2_y'] - points_of_interest['3_x']
 
-            best_read = points_of_interest.loc[points_of_interest['criterion'].idxmax()]
-        except:
-            #global failure_count
-            #failure_count += 1
-            print(f"[DEBUG] Warning: No valid spanning read found between {merged_alignments['5_x'].values[0]} and {merged_alignments['5_y'].values[0]}. Failure count: {failure_count}")
-            return merged_alignments['5_y'].values[0]
+                if iteration == max_iterations - 1 and relax_step == len(relaxation_steps) - 1:  # verbose on last iteration and step
+                    print("ULTRAMEGADEBUG", points_of_interest)
 
-        # Return entire row as a Series (will need all data for merging of contigs later)
-        return best_read
-    
+                # Try to find spanning read with current relaxed conditions
+                try:
+                    best_read = points_of_interest.loc[points_of_interest['criterion'].idxmax()]
+                    print(f"[DEBUG] Found spanning read {best_read[0]} on iteration {iteration + 1}, relaxation step {relax_step + 1}")
+                    return best_read
+                except:
+                    print(f"[DEBUG] No spanning read found with relaxation step {relax_step + 1}")
+                    continue  # Try next relaxation step
+            
+            ############## Expected gap size not used considerremove
+            dup_chroms = [idx for idx, item in orderings['chr'].items() if orderings['chr'].tolist().count(item) > 1]
+            chrom_windows = [list(item[1].itertuples()) for item in list(orderings.groupby('chr', sort=False))]
+
+            #print(chrom_windows[i])
+            def get_expected_gap_sizes(chr: List[pd.Series]) -> List[int]:
+                res = []
+
+                p1 = 0
+                p2 = 1
+
+                while p2 < len(chr):
+                    #print(f"Comparing {chr[p2][4]} and {chr[p1][5]}")
+                    res.append((chr[p1][1], chr[p2][1], chr[p2][4] - chr[p1][5]))
+                    p1 += 1
+                    p2 += 1
+                return res
+            
+            expected_gap_sizes = [get_expected_gap_sizes(item) for item in chrom_windows]
+            #for item in expected_gap_sizes:
+                #print(f"[DEBUG] Expected gap sizes: {item}")
+            ##################
+
+            # If all relaxation steps failed, try extension (only if not last iteration and extension is enabled)
+            if iteration < max_iterations - 1 and enable_extension:
+                
+                # Try to extend the left contig
+                print(f"[DEBUG] Iteration {iteration + 1}: No valid spanning read found between {current_merged_alignments['5_x'].values[0]} and {current_merged_alignments['5_y'].values[0]}. Attempting contig extension...")
+                
+                # Get alignments for the left contig to attempt extension
+                left_contig_name = current_merged_alignments['5_x'].values[0]
+                right_contig_name = current_merged_alignments['5_y'].values[0]
+
+
+                if iteration == 0:
+                    left_contig_alignments = whole_alignments[whole_alignments[5] == original_left_contig]  # Always use original left contig for extension search
+                else:
+                    left_contig_alignments = whole_alignments[whole_alignments[5] == left_contig_name]
+                
+                #^ This is iffy
+
+                # Apply extend(left=False) logic to find extension reads
+                extension_candidates = left_contig_alignments[
+                    (left_contig_alignments[1] >= length_threshold) &
+                    (left_contig_alignments[11] >= phred_threshold) &
+                    (left_contig_alignments[4] == '+') &  # Positive strand
+                    (left_contig_alignments[6] - left_contig_alignments[8] < 100)  # Close to end of contig
+                ].copy()
+
+                print(f"[DEBUG] Found {len(extension_candidates)} extension candidates for contig {left_contig_name}")
+                print(extension_candidates.head())
+                
+                if not extension_candidates.empty:
+                    # Find best extension read
+                    extension_candidates['extension_criterion'] = extension_candidates[1] - extension_candidates[3]
+                    best_extension = extension_candidates.loc[extension_candidates['extension_criterion'].idxmax()]
+                    print(f"[DEBUG] Found best extension read {best_extension[0]} for contig {left_contig_name} with extension criterion {best_extension['extension_criterion']}")
+                    
+                    xprime = best_extension[2]
+                    yprime = best_extension[3]
+                    x = best_extension[7]
+                    y = best_extension[8]
+
+                    new_contig = contig_seqs[contig_ids.index(original_left_contig)][:y] + read_seqs[read_ids.index(best_extension[0])][yprime:]
+
+                    mapping_record = [
+                        SeqRecord.SeqRecord(new_contig, id=f"{original_left_contig}_iter_{iteration + 1}", description=f"Extended {original_left_contig} with read {best_extension[0]}"),
+                        contigs[contig_ids.index(right_contig_name)]
+                    ]
+
+                    cur_dir = os.getcwd()
+                    if not os.path.exists(os.path.join(cur_dir, "temp_contigs")):
+                        os.makedirs("temp_contigs")
+
+                    SeqIO.write(mapping_record, os.path.join(cur_dir, "temp_contigs", f"{original_left_contig}_iter_{iteration + 1}.fasta"), "fasta")
+
+                    # Call fill_gaps.sh to fill gaps in the new contig
+                    paf_filename = f"{os.path.basename(reads_file)}_mapped_to_{original_left_contig}_iter_{iteration + 1}.sorted.paf"
+                    if not os.path.exists(os.path.join(cur_dir, "temp_contigs", paf_filename)):
+                        print(f"[DEBUG] {paf_filename} not found. Creating it now.")
+                        subprocess.call(["fill_gaps.sh",
+                                      os.path.join(cur_dir, "temp_contigs", f"{original_left_contig}_iter_{iteration + 1}.fasta"),
+                                       f"{reads_file}",
+                                        "--no_bam", "-o", "temp_contigs"
+                                      ])
+                    
+                    # Load new alignments and prepare for next iteration
+                    new_alignments = pd.read_csv(os.path.join(cur_dir, "temp_contigs", paf_filename), delimiter='\t', header=None)
+                    by_contig2 = list(zip([item for _, item in new_alignments.groupby(5, sort=False)], orderings['chr']))
+
+                    merged2 = list(map(lambda x: pd.merge(x[0][0], x[1][0], how = 'inner', on = 0), (filter(lambda x: x[0][1] == x[1][1], mit.pairwise(by_contig2)))))
+                    
+                    if merged2:  # If we have new merged alignments, use them for next iteration
+                        current_merged_alignments = merged2[0]
+                        whole_alignments = new_alignments
+                        print(f"[DEBUG] Updated alignments for iteration {iteration + 2}")
+                    else:
+                        print(f"[DEBUG] No new merged alignments found, will retry with same data")
+                        
+                    print(f"[DEBUG] Found potential extension read {best_extension[0]} for contig {left_contig_name}")
+                else:
+                    print(f"[DEBUG] No extension candidates found for iteration {iteration + 1}")
+                    # Continue to next iteration anyway, maybe with relaxed criteria
+                    continue
+            else:
+                # This is the last iteration, all relaxation steps failed, or extension is disabled
+                failure_count += 1
+                extension_msg = "and extension disabled" if not enable_extension else ""
+                print(f"[DEBUG] All {max_iterations} iterations and relaxation steps failed {extension_msg}. No valid spanning read found between {original_left_contig} and {original_right_contig}. Failure count: {failure_count}")
+                return original_right_contig
+        
+        # This should never be reached due to the max_iterations check above, but just in case
+        failure_count += 1
+        print(f"[DEBUG] Unexpected end of iterations. Failure count: {failure_count}")
+        return original_right_contig
+
 
     by_contig = list(zip([item for _, item in alignments.groupby(5, sort=False)], orderings['chr']))
 
@@ -206,9 +446,37 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
     #spanning_reads = [find_best_read(item) for item in merged if not item.empty]
     
     print("[DEBUG] Finding best spanning reads for merged alignments...")
-    spanning_reads = [find_best_read(item, phred_threshold=phred_threshold, length_threshold=length_threshold) for item in merged]
+    #spanning_reads = [find_best_read(item, phred_threshold=phred_threshold, length_threshold=length_threshold) for item in merged]
+
+    spanning_reads = []
+    for item in merged:
+        chosen_read = find_best_read(item, whole_alignments=alignments, phred_threshold=phred_threshold, length_threshold=length_threshold, max_iterations=2, enable_extension=enable_extension)
+        try:
+            #print('AAAAAAAAAAAAA', item['5_x'].values[0] if not isinstance(item, str) else item, item['5_y'].values[0], chosen_read[0] if isinstance(chosen_read, pd.Series) else chosen_read)
+            pass
+        except:
+            print(f"[DEBUGGGGGGGG] Warning: No valid spanning read found. Skipping.")
+            chosen_read = item['5_y'].values[0]
+        spanning_reads.append(chosen_read)
 
     return spanning_reads
+
+
+
+
+def generate_descriptions(contigs: List[str], reads, contigos) -> List[str]:
+    read_ids = [item.id for item in reads]
+    read_seqs = [item.seq for item in reads]
+    contig_ids = [item.id for item in contigos]
+    contig_seqs = [item.seq for item in contigos]
+    if isinstance(contigs, pd.Series):
+        return(contigs[0])
+    elif contigs is None:
+        return('None')
+    else:
+        contig_length = len(contig_seqs[contig_ids.index(contigs)]) if contigs else 0
+        return(f"{contigs}_len_{contig_length}")
+    
 
 @click.command()
 @click.argument('alignments_file', type=click.Path(exists=True))
@@ -218,7 +486,8 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, phred_
 @click.option('--expected_telomere_length', default=8000, help='Expected length of telomeres (default: 8000)')
 @click.option('--length_threshold', default=0, help='Minimum length of reads to consider (default: 0)')
 @click.option('--phred_threshold', default=20, help='Minimum Phred quality score of reads to consider (default: equivalent to 1/100 chance of mapping misplacement <20 for telomere extension, 10 for spanning reads>)')
-def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, expected_telomere_length, length_threshold, phred_threshold) -> dict:
+@click.option('--disable_extension', is_flag=True, help='Disable computationally expensive contig extension iterations (default: extension enabled)')
+def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, expected_telomere_length, length_threshold, phred_threshold, disable_extension) -> dict:
 
 
     click.echo(f"[DEBUG] Starting merge_contigs with parameters:\n")
@@ -229,6 +498,7 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     click.echo(f"expected_telomere_length: {expected_telomere_length}")
     click.echo(f"length_threshold: {length_threshold}")
     click.echo(f"phred_threshold: {phred_threshold}")
+    click.echo(f"extension_enabled: {not disable_extension}")
 
     print("[DEBUG] Reading input files...")
     alignments = pd.read_csv(alignments_file, delimiter='\t', header=None)
@@ -249,9 +519,10 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
                                            phred_threshold=phred_threshold)
     
     print("[DEBUG] Running simple_contig_span in merge_contigs...")
-    spanning_reads = simple_contig_span(alignments, orderings, 
+    spanning_reads = simple_contig_span(alignments, orderings, reads, contigs, reads_file=reads_file,
                                         length_threshold=length_threshold, 
-                                        phred_threshold=phred_threshold)  #<- phred_threshold is halved for spanning reads since the mapping is paired.
+                                        phred_threshold=phred_threshold,
+                                        enable_extension=not disable_extension)  #<- phred_threshold is halved for spanning reads since the mapping is paired.
     
     final_hash = deepcopy(chr_to_contigs)
     print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
@@ -297,128 +568,13 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     contig_seqs = [item.seq for item in contigs]
 
     #test = deepcopy(final_hash['III'])
-    def combine_contigs(arr: list) -> list:
-        print("[DEBUG] Combining contigs for a chromosome...")
-
-
-        ################################## This has a logical error, if compound merges this breaks.
-        def inter_contig_merge(str1, str2, series_rules):
-            print("[DEBUG] Running inter_contig_merge...")
-            if not isinstance(str1, str):
-                l_str = str1
-                base_x = len(l_str) - series_rules['7_x'] + series_rules['8_x'] #If str1 is SeqIO object, that means it has been merged to some extent and the indices stored in '8_x' are incorrect.
-                
-            else:
-                l_str = contig_seqs[contig_ids.index(str1)]
-                base_x = series_rules['8_x']
-            #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
-            if not isinstance(str2, str):
-                r_str = str2
-            else:
-                r_str = contig_seqs[contig_ids.index(str2)]
-            #^^^^ If inter merge is used, str2 is a Bio.Seq.Seq object
-
-
-            base_y = series_rules['7_y']
-            #print(f"[DEBUG] base_x: {base_x}, base_y: {base_y}, str1: {str1}, str2: {str2}")
-
-            x_prime = series_rules['3_x']
-            y_prime = series_rules['2_y']
-            
-
-            if series_rules['criterion'] < 0:
-                x = base_x - (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the left contig, not the right one.
-                y = base_y + (series_rules['3_y'] - series_rules['2_x']) #<- this is the length of the right contig, not the left one.
-                x_prime, y_prime = y_prime, x_prime 
-            else:
-                x = base_x
-                y = base_y
-
-            mid_str = read_seqs[read_ids.index(series_rules[0])]
-            
-
-            #print(f"[DEBUG] {series_rules[0]}_span_len {len(mid_str[x_prime + 1:y_prime])}, {str1}_len_{len(l_str[:x])}, {str2}_len_{len(r_str[y:])}")
-            
-
-            return(l_str[:x] + mid_str[x_prime + 1:y_prime] + r_str[y:])      #<----not sure +1 or not, but it is not important now. Also read mismatches at ends not accounted for yet.
-
-        ##################################
-
-        def telomere_merge(str1, series_rules, left = True):
-            """
-            Merges the contig with the telomere using the best spanning read.
-            """
-            print(f"[DEBUG] Running telomere_merge ({'left' if left else 'right'})...")
-            if not isinstance(str1, str):
-                rel_str = str1
-            else:
-                rel_str = contig_seqs[contig_ids.index(str1)]
-            #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object, otherwise it is a string.
-
-            telo_str = read_seqs[read_ids.index(series_rules[0])]
-
-            if left:
-                x = series_rules[2]
-                #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
-                return telo_str[:x] + rel_str
-            else:
-                y = series_rules[3]
-                #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
-                return rel_str + telo_str[y + 1:]
-
-        
-        i = 1
-        while i < len(arr) - 2:
-            #print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
-            s1 = arr[i]
-            s2 = arr[i + 2]
-            merge_rule = arr[i + 1]
-
-            if isinstance(merge_rule, pd.Series):
-                #print(f"[DEBUG] Performing inter-contig merge between {s1} and {s2}...")
-                merged = inter_contig_merge(s1, s2, merge_rule)
-                # Replace s1 and s2 with merged string
-                arr[i] = merged
-                # Remove merge rule and s2
-                del arr[i + 1:i + 3]
-                # Step back to try more merges with new merged result
-                i = max(i - 2, 1)
-            else:
-                i += 2
-        
-
-        
-        # Handle telomere merges
-        if isinstance(arr[0], pd.Series):
-            #print("[DEBUG] Performing left telomere merge...")
-            arr[0] = telomere_merge(arr[1], arr[0], left=True)
-            del arr[1]
-        if isinstance(arr[-1], pd.Series):
-            #print("[DEBUG] Performing right telomere merge...")
-            arr[-1] = telomere_merge(arr[-2], arr[-1], left=False)
-            del arr[-2]
-        
-        
-        return(arr)
-    
-
-
-    def generate_descriptions(contigs: List[str]) -> List[str]:
-        if isinstance(contigs, pd.Series):
-            return(contigs[0])
-        elif contigs is None:
-            return('None')
-        else:
-            contig_length = len(contig_seqs[contig_ids.index(contigs)]) if contigs else 0
-            return(f"{contigs}_len_{contig_length}")
-
 
     print("[DEBUG] Combining contigs for all chromosomes...")
-    final_merged = {chr: combine_contigs(item) for chr, item in deepcopy(final_hash).items()}
+    final_merged = {chr: combine_contigs(item, reads, contigs) for chr, item in deepcopy(final_hash).items()}
     print("[DEBUG] Finished merge_contigs.")
 
     print("[DEBUG] Generating descriptions for contigs...")
-    final_labels = {chr: ('-'.join([generate_descriptions(item) for item in final_hash[chr]])).split('-None-') for chr in final_hash}
+    final_labels = {chr: ('-'.join([generate_descriptions(item, reads, contigs) for item in final_hash[chr]])).split('-None-') for chr in final_hash}
     print(f"[DEBUG] Generated descriptions: {final_labels}")
 
 
