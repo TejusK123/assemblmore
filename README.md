@@ -4,3 +4,5 @@ Future iterations will attempt to 'un-collapse' complex genomic regions such as 
 
 ## NOTE
 All testing was done with relatively good datasets (N50 >= 45kb) on hermaphroditic or inbred worms. 
+
+When adding /src/ to path, make sure to NOT use ~/ shell expansion. Use the $HOME value instead.
