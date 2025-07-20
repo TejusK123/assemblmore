@@ -335,6 +335,19 @@ main() {
     ASM_BASE=$(basename "$ASM_ABS" | sed 's/\.\(fasta\|fa\|fna\)$//')
     READS_BASE=$(basename "$READS_ABS" | sed 's/\.\(fastq\|fq\|fasta\|fa\)$//')
 
+
+    REF_BASE="${REF_BASE%.fasta}"
+    REF_BASE="${REF_BASE%.fa}"
+    REF_BASE="${REF_BASE%.fna}"
+    ASM_BASE="${ASM_BASE%.fasta}"
+    ASM_BASE="${ASM_BASE%.fa}"
+    ASM_BASE="${ASM_BASE%.fna}"
+    READS_BASE="${READS_BASE%.fastq}"
+    READS_BASE="${READS_BASE%.fq}"
+    READS_BASE="${READS_BASE%.fna}"
+    READS_BASE="${READS_BASE%.fasta}"
+    READS_BASE="${READS_BASE%.fa}"
+    
     log "$REF_BASE"
     log "$ASM_BASE"
     log "$READS_BASE"
@@ -350,9 +363,8 @@ main() {
     log_verbose "Phred threshold: $PHRED_THRESHOLD"
     
     # Step 1: Map assembly contigs to reference genome
-    REF_BASE="${REF_BASE%.fasta}"
-    REF_BASE="${REF_BASE%.fa}"
-    REF_BASE="${REF_BASE%.fna}"
+
+
 
     STEP1_PAF="${ASM_BASE}_mapped_to_${REF_BASE}.sorted.paf"
     BAM_FLAG=""

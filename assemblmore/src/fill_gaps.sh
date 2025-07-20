@@ -79,6 +79,12 @@ basename_contig="${basename_contig%.fasta}"
 basename_contig="${basename_contig%.fa}"
 basename_contig="${basename_contig%.fna}"
 
+basename_reads="${basename_reads%.fastq}"
+basename_reads="${basename_reads%.fq}"
+basename_reads="${basename_reads%.fna}"
+basename_reads="${basename_reads%.fasta}"
+basename_reads="${basename_reads%.fa}"
+
 echo "Mapping ONT reads to contig: $basename_contig"
 echo "Using ONT reads from: $ONT_READS"
 echo "Output directory: $OUTPUT_DIR"
