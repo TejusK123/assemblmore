@@ -428,7 +428,12 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
                     SeqIO.write(mapping_record, os.path.join(cur_dir, "temp_contigs", f"{original_left_contig}_iter_{iteration + 1}.fasta"), "fasta")
 
                     # Call fill_gaps.sh to fill gaps in the new contig
-                    paf_filename = f"{os.path.basename(reads_file)}_mapped_to_{original_left_contig}_iter_{iteration + 1}.sorted.paf"
+                    cleaned_reads_file = os.path.basename(reads_file).removesuffix('.fasta')
+                    cleaned_reads_file = cleaned_reads_file.removesuffix('.fna')  # Remove .fna extension for consistency
+                    cleaned_reads_file = cleaned_reads_file.removesuffix('.fastq')  # Remove .fastq extension for consistency
+                    cleaned_reads_file = cleaned_reads_file.removesuffix('.fa')  # Remove .fa extension for consistency
+                    
+                    paf_filename = f"{cleaned_reads_file}_mapped_to_{original_left_contig}_iter_{iteration + 1}.sorted.paf"
                     if not os.path.exists(os.path.join(cur_dir, "temp_contigs", paf_filename)):
                         print(f"[DEBUG] {paf_filename} not found. Creating it now.")
                         subprocess.call(["fill_gaps.sh",
