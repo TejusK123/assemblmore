@@ -13,8 +13,11 @@ import subprocess
 
 
 
-def combine_contigs(arr: list, reads, contigs) -> list:
+def combine_contigs(arr: list, reads, contigs, extended_contigs: dict = None) -> list:
     print("[DEBUG] Combining contigs for a chromosome...")
+    
+    if extended_contigs is None:
+        extended_contigs = {}
 
     read_ids = [item.id for item in reads]
     read_seqs = [item.seq for item in reads]
@@ -29,13 +32,25 @@ def combine_contigs(arr: list, reads, contigs) -> list:
             base_x = len(l_str) - series_rules['7_x'] + series_rules['8_x'] #If str1 is SeqIO object, that means it has been merged to some extent and the indices stored in '8_x' are incorrect.
             
         else:
-            l_str = contig_seqs[contig_ids.index(str1)]
+            print(f"[DEBUG] str1 is a string, using contig_seqs for {str1}...")
+            # Check if this contig was extended, use extended sequence if available
+            if str1 in extended_contigs:
+                l_str = extended_contigs[str1]
+                print(f"[DEBUG] Using extended sequence for {str1} (length: {len(l_str)})")
+            else:
+                l_str = contig_seqs[contig_ids.index(str1)]
             base_x = series_rules['8_x']
         #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object
         if not isinstance(str2, str):
             r_str = str2
         else:
-            r_str = contig_seqs[contig_ids.index(str2)]
+            print(f"[DEBUG] str2 is a string, using contig_seqs for {str2}...")
+            # Check if this contig was extended, use extended sequence if available  
+            if str2 in extended_contigs:
+                r_str = extended_contigs[str2]
+                print(f"[DEBUG] Using extended sequence for {str2} (length: {len(r_str)})")
+            else:
+                r_str = contig_seqs[contig_ids.index(str2)]
         #^^^^ If inter merge is used, str2 is a Bio.Seq.Seq object
 
 
@@ -72,7 +87,12 @@ def combine_contigs(arr: list, reads, contigs) -> list:
         if not isinstance(str1, str):
             rel_str = str1
         else:
-            rel_str = contig_seqs[contig_ids.index(str1)]
+            # Check if this contig was extended, use extended sequence if available
+            if str1 in extended_contigs:
+                rel_str = extended_contigs[str1]  
+                print(f"[DEBUG] Using extended sequence for telomere merge {str1} (length: {len(rel_str)})")
+            else:
+                rel_str = contig_seqs[contig_ids.index(str1)]
         #^^^^ If inter merge is used, str1 is a Bio.Seq.Seq object, otherwise it is a string.
 
         telo_str = read_seqs[read_ids.index(series_rules[0])]
@@ -222,12 +242,15 @@ def telomere_extension(alignments: pd.DataFrame, orderings: pd.DataFrame, expect
 
 
 failure_count = 0
-def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads, contigs, reads_file, phred_threshold: int = 10, length_threshold: int = 0, enable_extension: bool = True) -> List[str]:
+def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads, contigs, reads_file, phred_threshold: int = 10, length_threshold: int = 0, enable_extension: bool = True) -> tuple:
     print("[DEBUG] Running simple_contig_span...") 
     read_ids = [item.id for item in reads]
     read_seqs = [item.seq for item in reads]
     contig_ids = [item.id for item in contigs]
     contig_seqs = [item.seq for item in contigs]
+    
+    # Track extended contigs - maps original contig name to extended sequence
+    extended_contigs = {}
 
 
     def find_best_read(merged_alignments: pd.DataFrame, whole_alignments: pd.DataFrame, phred_threshold: int = 10, length_threshold: int = 0, max_iterations: int = 3, enable_extension: bool = True) -> pd.Series:  
@@ -246,6 +269,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
             Best spanning read as pandas Series or fallback contig name
         """
         global failure_count
+        nonlocal extended_contigs  # Access the extended_contigs from outer scope
         
         if not isinstance(merged_alignments, pd.DataFrame):
             print(f"[DEBUG] Warning: Empty alignment found between {merged_alignments[0]} and {merged_alignments[1]}. Skipping.")
@@ -257,6 +281,9 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
         current_merged_alignments = merged_alignments
         
         print(f"[DEBUG] Finding best spanning read for {original_left_contig} and {original_right_contig}")
+        
+        # Initialize temp extended contig for this function call
+        temp_extended_contig = None
         
         # Iterative approach instead of recursion
         for iteration in range(max_iterations):
@@ -304,8 +331,20 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
                 try:
                     best_read = points_of_interest.loc[points_of_interest['criterion'].idxmax()]
                     print(f"[DEBUG] Found spanning read {best_read[0]} on iteration {iteration + 1}, relaxation step {relax_step + 1}")
+                    print("THIS IS EXTENDED CONTIGS", extended_contigs)
+                    
+                    # If we found a spanning read and we have a temp extended contig from this iteration, store it
+                    print(f"[DEBUG] Checking temp_extended_contig: exists={temp_extended_contig is not None}, value={temp_extended_contig}")
+                    if 'temp_extended_contig' in locals() and temp_extended_contig is not None:
+                        print(f"[DEBUG] Adding extended contig for {original_left_contig}")
+                        extended_contigs[original_left_contig] = temp_extended_contig
+                        print(f"[DEBUG] Successfully stored extended sequence for {original_left_contig} (length: {len(temp_extended_contig)}) - spanning read found!")
+                    else:
+                        print(f"[DEBUG] No temp extended contig to store for {original_left_contig}")
+                    
                     return best_read
-                except:
+                except Exception as e:
+                    print(f"[DEBUG] Exception in spanning read search: {e}")
                     print(f"[DEBUG] No spanning read found with relaxation step {relax_step + 1}")
                     continue  # Try next relaxation step
             
@@ -373,6 +412,9 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
                     y = best_extension[8]
 
                     new_contig = contig_seqs[contig_ids.index(original_left_contig)][:y] + read_seqs[read_ids.index(best_extension[0])][yprime:]
+                    
+                    # Don't store extended contig yet - only store if it leads to successful spanning read
+                    print(f"[DEBUG] Created extended sequence for {original_left_contig} (length: {len(new_contig)}) - will store only if successful")
 
                     mapping_record = [
                         SeqRecord.SeqRecord(new_contig, id=f"{original_left_contig}_iter_{iteration + 1}", description=f"Extended {original_left_contig} with read {best_extension[0]}"),
@@ -405,6 +447,8 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
                         current_merged_alignments = merged2[0]
                         whole_alignments = new_alignments
                         print(f"[DEBUG] Updated alignments for iteration {iteration + 2}")
+                        # Store the extended contig and new_contig for potential success
+                        temp_extended_contig = new_contig
                     else:
                         print(f"[DEBUG] No new merged alignments found, will retry with same data")
                         
@@ -459,12 +503,15 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
             chosen_read = item['5_y'].values[0]
         spanning_reads.append(chosen_read)
 
-    return spanning_reads
+    return spanning_reads, extended_contigs
 
 
 
 
-def generate_descriptions(contigs: List[str], reads, contigos) -> List[str]:
+def generate_descriptions(contigs: List[str], reads, contigos, extended_contigs: dict = None) -> List[str]:
+    if extended_contigs is None:
+        extended_contigs = {}
+        
     read_ids = [item.id for item in reads]
     read_seqs = [item.seq for item in reads]
     contig_ids = [item.id for item in contigos]
@@ -474,8 +521,13 @@ def generate_descriptions(contigs: List[str], reads, contigos) -> List[str]:
     elif contigs is None:
         return('None')
     else:
-        contig_length = len(contig_seqs[contig_ids.index(contigs)]) if contigs else 0
-        return(f"{contigs}_len_{contig_length}")
+        # Check if this contig was extended
+        if contigs in extended_contigs:
+            contig_length = len(extended_contigs[contigs])
+            return(f"{contigs}_extended_len_{contig_length}")
+        else:
+            contig_length = len(contig_seqs[contig_ids.index(contigs)]) if contigs else 0
+            return(f"{contigs}_len_{contig_length}")
     
 
 @click.command()
@@ -519,10 +571,12 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
                                            phred_threshold=phred_threshold)
     
     print("[DEBUG] Running simple_contig_span in merge_contigs...")
-    spanning_reads = simple_contig_span(alignments, orderings, reads, contigs, reads_file=reads_file,
+    spanning_reads, extended_contigs = simple_contig_span(alignments, orderings, reads, contigs, reads_file=reads_file,
                                         length_threshold=length_threshold, 
                                         phred_threshold=phred_threshold,
                                         enable_extension=not disable_extension)  #<- phred_threshold is halved for spanning reads since the mapping is paired.
+    
+    print(f"[DEBUG] Found {len(extended_contigs)} extended contigs: {list(extended_contigs.keys())}")
     
     final_hash = deepcopy(chr_to_contigs)
     print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
@@ -553,7 +607,22 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
               
     print("[DEBUG] Inserting spanning reads into final_hash...")
     for i, item in enumerate(spanning_reads):
-        chr = contigs_to_chr[item['5_x']] if type(item) != str else contigs_to_chr[item]
+        # Extract original contig name if this is an extended contig
+        if type(item) != str:
+            left_contig = item['5_x']
+            # If this is an extended contig (contains _iter_), extract original name
+            if '_iter_' in left_contig:
+                original_left_contig = left_contig.split('_iter_')[0]
+            else:
+                original_left_contig = left_contig
+            chr = contigs_to_chr[original_left_contig]
+        else:
+            # If this is an extended contig name (contains _iter_), extract original name
+            if '_iter_' in item:
+                original_contig = item.split('_iter_')[0]
+            else:
+                original_contig = item
+            chr = contigs_to_chr[original_contig]
         
         if type(item) != str:
             index = get_index(final_hash[chr], item['5_y'])
@@ -570,11 +639,11 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     #test = deepcopy(final_hash['III'])
 
     print("[DEBUG] Combining contigs for all chromosomes...")
-    final_merged = {chr: combine_contigs(item, reads, contigs) for chr, item in deepcopy(final_hash).items()}
+    final_merged = {chr: combine_contigs(item, reads, contigs, extended_contigs) for chr, item in deepcopy(final_hash).items()}
     print("[DEBUG] Finished merge_contigs.")
 
     print("[DEBUG] Generating descriptions for contigs...")
-    final_labels = {chr: ('-'.join([generate_descriptions(item, reads, contigs) for item in final_hash[chr]])).split('-None-') for chr in final_hash}
+    final_labels = {chr: ('-'.join([generate_descriptions(item, reads, contigs, extended_contigs) for item in final_hash[chr]])).split('-None-') for chr in final_hash}
     print(f"[DEBUG] Generated descriptions: {final_labels}")
 
 
@@ -588,9 +657,13 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     for chr, contigs in final_merged.items():
         for i, contig in enumerate(contigs):
             if isinstance(contig, str):
-                #print(f"  Contig: {contig} (length: {len(contig)})")
-                contig = contig_seqs[contig_ids.index(contig)]
-                contig_record = SeqRecord.SeqRecord(seq=contig, id=f"{chr}_contig_{i+1}", description = final_labels[chr][i] if i < len(final_labels[chr]) else "")
+                # Check if this contig was extended, use extended sequence if available
+                if contig in extended_contigs:
+                    contig_seq = extended_contigs[contig]
+                    print(f"[DEBUG] Using extended sequence for output {contig} (length: {len(contig_seq)})")
+                else:
+                    contig_seq = contig_seqs[contig_ids.index(contig)]
+                contig_record = SeqRecord.SeqRecord(seq=contig_seq, id=f"{chr}_contig_{i+1}", description = final_labels[chr][i] if i < len(final_labels[chr]) else "")
                 fasta_record.append(contig_record)
                 i += 1
             elif contig is None:
