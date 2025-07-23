@@ -219,12 +219,12 @@ cleanup() {
 # Function to run a step with error handling
 run_step() {
     local step_name="$1"
-    local step_cmd="$2"
+    shift  # Remove step_name, leaving the actual command and arguments
     
     log "Starting $step_name..."
-    log_verbose "Command: $step_cmd"
+    log_verbose "Command: $*"
     
-    if eval "$step_cmd"; then
+    if "$@"; then
         log "✓ $step_name completed successfully"
     else
         log "✗ $step_name failed"
@@ -364,17 +364,16 @@ main() {
     
     # Step 1: Map assembly contigs to reference genome
 
-
-
     STEP1_PAF="${ASM_BASE}_mapped_to_${REF_BASE}.sorted.paf"
-    BAM_FLAG=""
-    if [ "$SKIP_BAM" = true ]; then
-        BAM_FLAG="--no-bam"
-    fi
 
     if [ ! -f "$STEP1_PAF" ]; then
-        run_step "Step 1: Mapping assembly contigs to reference" \
-            "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$REF_ABS\" \"$ASM_ABS\" \"$MAP_PRESET_1\""
+        if [ "$SKIP_BAM" = true ]; then
+            run_step "Step 1: Mapping assembly contigs to reference" \
+                "$SCRIPT_DIR/fill_gaps.sh" --no-bam -ax "$MAP_PRESET_1" "$REF_ABS" "$ASM_ABS"
+        else
+            run_step "Step 1: Mapping assembly contigs to reference" \
+                "$SCRIPT_DIR/fill_gaps.sh" -ax "$MAP_PRESET_1" "$REF_ABS" "$ASM_ABS"
+        fi
     else
         log "Skipping Step 1: PAF file already exists: $STEP1_PAF"
     fi
@@ -401,7 +400,7 @@ main() {
     FILTERED_TSV="filtered_by_${ACTUAL_REF_BASE}_contigs.tsv"
     INITIAL_ASSEMBLY="ordered_and_oriented_to_${ACTUAL_REF_BASE}_assembly.fasta"
     run_step "Step 2: Creating initial refined assembly" \
-        "\"$SCRIPT_DIR/initial_assembly.sh\" \"$STEP1_PAF\" \"$READS_ABS\" \"$ASM_ABS\""
+        "$SCRIPT_DIR/initial_assembly.sh" "$STEP1_PAF" "$READS_ABS" "$ASM_ABS"
     
     if [ ! -f "$FILTERED_TSV" ] || [ ! -f "$INITIAL_ASSEMBLY" ]; then
         log "ERROR: Step 2 did not produce expected output files"
@@ -414,8 +413,13 @@ main() {
     STEP3_PAF="${READS_BASE}_mapped_to_${INITIAL_BASE}.sorted.paf"
     
     if [ ! -f "$STEP3_PAF" ]; then
-    run_step "Step 3: Mapping reads to refined assembly" \
-        "\"$SCRIPT_DIR/fill_gaps.sh\" $BAM_FLAG \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" \"$MAP_PRESET_2\" \"$MAX_ALIGNMENTS\""
+        if [ "$SKIP_BAM" = true ]; then
+            run_step "Step 3: Mapping reads to refined assembly" \
+                "$SCRIPT_DIR/fill_gaps.sh" --no-bam -ax "$MAP_PRESET_2" -N "$MAX_ALIGNMENTS" "$INITIAL_ASSEMBLY" "$READS_ABS"
+        else
+            run_step "Step 3: Mapping reads to refined assembly" \
+                "$SCRIPT_DIR/fill_gaps.sh" -ax "$MAP_PRESET_2" -N "$MAX_ALIGNMENTS" "$INITIAL_ASSEMBLY" "$READS_ABS"
+        fi
     else
         log "Skipping Step 3: PAF file already exists: $STEP3_PAF"
     fi
@@ -427,7 +431,7 @@ main() {
     
     # Step 4: Generate final assembly
     run_step "Step 4: Generating final assembly" \
-        "\"$SCRIPT_DIR/span_contigs.sh\" \"$STEP3_PAF\" \"$FILTERED_TSV\" \"$INITIAL_ASSEMBLY\" \"$READS_ABS\" --expected_telomere_length \"$EXPECTED_TELOMERE_LENGTH\" --length_threshold \"$LENGTH_THRESHOLD\" --phred_threshold \"$PHRED_THRESHOLD\""
+        "$SCRIPT_DIR/span_contigs.sh" "$STEP3_PAF" "$FILTERED_TSV" "$INITIAL_ASSEMBLY" "$READS_ABS" --expected_telomere_length "$EXPECTED_TELOMERE_LENGTH" --length_threshold "$LENGTH_THRESHOLD" --phred_threshold "$PHRED_THRESHOLD"
     
     # Rename final output to something more descriptive
     FINAL_OUTPUT="assemblmore_final_assembly.fasta"
@@ -462,7 +466,7 @@ main() {
         
         # Run custom R script for comparative assembly analysis
         run_step "Generating comparative assembly statistics" \
-            "Rscript \"$SCRIPT_DIR/assembly_stats.R\" \"$ASM_ABS:Original\" \"$(pwd)/$FINAL_OUTPUT:Improved\" \"$(pwd)/stats\""
+            Rscript "$SCRIPT_DIR/assembly_stats.R" "$ASM_ABS:Original" "$(pwd)/$FINAL_OUTPUT:Improved" "$(pwd)/stats"
 
         log "Comparative assembly statistics saved in: $(pwd)/stats/"
         log "  - Individual NX plots: stats/*_nx_plot.png"
