@@ -8,6 +8,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(readr)
   library(scales)
+  library(dbscan)  # For DBSCAN clustering
 })
 
 # Function to read FASTA file and get sequence lengths
@@ -181,6 +182,14 @@ create_comparative_table <- function(results_list, output_file) {
     basic_stats <- result$contiguity_results$basic_stats
     nx_data <- result$contiguity_results$nx_data
     aun_value <- result$contiguity_results$aun
+    issues_result <- result$contiguity_results$issues
+    
+    # Extract issues count (handle case where issues calculation failed)
+    issues_count <- if (!is.null(issues_result) && !any(is.na(issues_result)) && !is.null(issues_result$total_issues)) {
+      issues_result$total_issues
+    } else {
+      NA
+    }
     
     row_data <- data.frame(
       Assembly = assembly_name,
@@ -192,7 +201,8 @@ create_comparative_table <- function(results_list, output_file) {
       N50 = nx_data$NX[which.min(abs(nx_data$X - 50))],
       N90 = nx_data$NX[which.min(abs(nx_data$X - 90))],
       auN = round(aun_value),
-      Max_Contig = basic_stats$max_length
+      Max_Contig = basic_stats$max_length,
+      Issues = issues_count
     )
     
     comparison_data <- rbind(comparison_data, row_data)
@@ -252,7 +262,7 @@ create_length_distribution_plot <- function(lengths_list, output_file) {
 }
 
 # CONTIGUITY METRICS
-calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir) {
+calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir, coverage_file = NULL) {
   cat("\n=== CONTIGUITY METRICS FOR", assembly_name, "===\n")
   
   # Basic statistics
@@ -282,6 +292,14 @@ calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir) {
   aun_value <- calculate_aun(lengths)
   cat(sprintf("\nauN (Area under NX curve): %s bp\n", comma(round(aun_value))))
   
+  # Calculate Issues metric if coverage file is provided
+  issues_result <- calculate_issues_metric(coverage_file, eps = 7500, output_dir, assembly_name)
+  if (!is.null(issues_result) && !any(is.na(issues_result)) && !is.null(issues_result$total_issues)) {
+    cat(sprintf("\nIssues metric: %s\n", comma(issues_result$total_issues)))
+  } else {
+    cat("\nIssues metric: Not available (no coverage file or calculation failed)\n")
+  }
+  
   # Create NX plot
   nx_plot_file <- file.path(output_dir, paste0(assembly_name, "_nx_plot.png"))
   create_nx_plot(nx_data, assembly_name, nx_plot_file)
@@ -294,8 +312,204 @@ calculate_contiguity_metrics <- function(lengths, assembly_name, output_dir) {
   return(list(
     basic_stats = basic_stats,
     nx_data = nx_data,
-    aun = aun_value
+    aun = aun_value,
+    issues = issues_result
   ))
+}
+
+# Function to calculate Issues metric from coverage data
+# This function identifies problematic regions in genome assemblies based on coverage discontinuities
+# 
+# Output files generated:
+# 1. {assembly_name}_issues_clusters_detailed.csv - Complete list of all positions in issue clusters
+#    Columns: chromosome, cluster_id, position, coverage, coverage_diff, cluster_size, cluster_span
+# 2. {assembly_name}_issues_clusters_summary.csv - Summary statistics for each cluster
+#    Columns: chromosome, cluster_id, cluster_size, cluster_span, start_position, end_position, 
+#             min_coverage, max_coverage, mean_coverage, max_coverage_diff
+#
+# Users can use these files to:
+# - Identify exact genomic coordinates of problematic regions
+# - Prioritize clusters by size or coverage characteristics
+# - Manual inspection and potential correction of assembly issues
+calculate_issues_metric <- function(coverage_file, eps = 7500, output_dir = ".", assembly_name = "assembly") {
+  if (is.null(coverage_file) || !file.exists(coverage_file)) {
+    cat("Coverage file not provided or does not exist. Skipping Issues metric.\n")
+    return(NA)
+  }
+  
+  tryCatch({
+    cat("Calculating Issues metric from coverage file:", coverage_file, "\n")
+    
+    # Read coverage data
+    coverage_data <- read_tsv(coverage_file, col_names = c("chr_name", "position", "coverage"), 
+                             show_col_types = FALSE)
+    
+    cat("Read", nrow(coverage_data), "coverage records\n")
+    cat("Unique chromosomes:", length(unique(coverage_data$chr_name)), "\n")
+    
+    # Process each chromosome separately using traditional approach
+    chromosomes <- unique(coverage_data$chr_name)
+    issues_by_chr <- data.frame(
+      chr_name = character(0),
+      issues_count = numeric(0),
+      stringsAsFactors = FALSE
+    )
+    
+    # Store detailed cluster information for output file
+    all_clusters <- data.frame(
+      chromosome = character(0),
+      cluster_id = character(0),
+      position = numeric(0),
+      coverage = numeric(0),
+      coverage_diff = numeric(0),
+      cluster_size = numeric(0),
+      cluster_span = numeric(0),
+      stringsAsFactors = FALSE
+    )
+    
+    for (chr in chromosomes) {
+      # Filter data for current chromosome
+      chr_data <- coverage_data[coverage_data$chr_name == chr, ]
+      
+      cat("Processing chromosome:", chr, "- positions:", nrow(chr_data), "\n")
+      
+      # Calculate coverage differences
+      coverage_diff <- c(0, diff(chr_data$coverage))
+      
+      # Calculate percentiles for outlier detection
+      percentiles <- quantile(coverage_diff, probs = c(0.000001, 0.999999), na.rm = TRUE)
+      
+      cat("  Coverage diff range:", min(coverage_diff, na.rm = TRUE), "to", max(coverage_diff, na.rm = TRUE), "\n")
+      cat("  Percentiles - 0.0001%:", percentiles[1], ", 99.9999%:", percentiles[2], "\n")
+      
+      # Find positions with extreme coverage differences
+      outlier_mask <- coverage_diff > percentiles[2] | coverage_diff < percentiles[1]
+      outlier_positions <- chr_data$position[outlier_mask]
+      
+      cat("  Found", length(outlier_positions), "outlier positions\n")
+      
+      if (length(outlier_positions) < 2) {
+        cat("  Not enough outliers for clustering\n")
+        issues_count <- 0
+      } else {
+        # Apply DBSCAN clustering
+        clusters <- dbscan(matrix(outlier_positions, ncol = 1), eps = eps, minPts = 2)
+        
+        # Count non-outlier clusters (exclude noise points with cluster = 0)
+        unique_clusters <- unique(clusters$cluster[clusters$cluster > 0])
+        issues_count <- length(unique_clusters)
+        
+        cat("  DBSCAN found", length(unique(clusters$cluster)), "total clusters,", issues_count, "non-noise clusters\n")
+        
+        # Store detailed cluster information
+        if (issues_count > 0) {
+          for (cluster_label in unique_clusters) {
+            cluster_positions <- outlier_positions[clusters$cluster == cluster_label]
+            cluster_indices <- which(chr_data$position %in% cluster_positions)
+            
+            # Calculate cluster statistics
+            cluster_span <- max(cluster_positions) - min(cluster_positions)
+            cluster_size <- length(cluster_positions)
+            
+            # Store each position in this cluster
+            for (idx in cluster_indices) {
+              all_clusters <- rbind(all_clusters, data.frame(
+                chromosome = chr,
+                cluster_id = paste0(chr, "_cluster_", cluster_label),
+                position = chr_data$position[idx],
+                coverage = chr_data$coverage[idx],
+                coverage_diff = coverage_diff[idx],
+                cluster_size = cluster_size,
+                cluster_span = cluster_span,
+                stringsAsFactors = FALSE
+              ))
+            }
+          }
+        }
+      }
+      
+      # Add to results
+      issues_by_chr <- rbind(issues_by_chr, data.frame(
+        chr_name = chr,
+        issues_count = issues_count,
+        stringsAsFactors = FALSE
+      ))
+    }
+    
+    # Sum up issues across all chromosomes
+    total_issues <- sum(issues_by_chr$issues_count, na.rm = TRUE)
+    
+    cat("Issues metric calculation completed. Total issues:", total_issues, "\n")
+    cat("Issues by chromosome:\n")
+    print(issues_by_chr)
+    
+    # Save detailed cluster information to file
+    if (nrow(all_clusters) > 0) {
+      # Sort clusters by chromosome and position
+      all_clusters <- all_clusters[order(all_clusters$chromosome, all_clusters$position), ]
+      
+      # Create cluster summary using base R
+      cluster_ids <- unique(all_clusters$cluster_id)
+      cluster_summary <- data.frame(
+        chromosome = character(0),
+        cluster_id = character(0),
+        cluster_size = numeric(0),
+        cluster_span = numeric(0),
+        start_position = numeric(0),
+        end_position = numeric(0),
+        min_coverage = numeric(0),
+        max_coverage = numeric(0),
+        mean_coverage = numeric(0),
+        max_coverage_diff = numeric(0),
+        stringsAsFactors = FALSE
+      )
+      
+      for (cid in cluster_ids) {
+        cluster_data <- all_clusters[all_clusters$cluster_id == cid, ]
+        summary_row <- data.frame(
+          chromosome = cluster_data$chromosome[1],
+          cluster_id = cid,
+          cluster_size = cluster_data$cluster_size[1],
+          cluster_span = cluster_data$cluster_span[1],
+          start_position = min(cluster_data$position),
+          end_position = max(cluster_data$position),
+          min_coverage = min(cluster_data$coverage),
+          max_coverage = max(cluster_data$coverage),
+          mean_coverage = round(mean(cluster_data$coverage), 2),
+          max_coverage_diff = max(abs(cluster_data$coverage_diff)),
+          stringsAsFactors = FALSE
+        )
+        cluster_summary <- rbind(cluster_summary, summary_row)
+      }
+      
+      # Save detailed clusters file
+      clusters_file <- file.path(output_dir, paste0(assembly_name, "_issues_clusters_detailed.csv"))
+      write_csv(all_clusters, clusters_file)
+      cat("Detailed cluster information saved to:", clusters_file, "\n")
+      
+      # Save cluster summary file
+      summary_file <- file.path(output_dir, paste0(assembly_name, "_issues_clusters_summary.csv"))
+      write_csv(cluster_summary, summary_file)
+      cat("Cluster summary saved to:", summary_file, "\n")
+    } else {
+      cat("No issue clusters found to save.\n")
+    }
+    
+    return(list(
+      total_issues = total_issues,
+      issues_by_chr = issues_by_chr,
+      cluster_details = all_clusters
+    ))
+    
+  }, error = function(e) {
+    cat("Error calculating Issues metric:", e$message, "\n")
+    cat("Note: This function requires the 'dbscan' package. Install with: install.packages('dbscan')\n")
+    cat("Alternative clustering methods available:\n")
+    cat("  - k-means clustering: kmeans()\n")
+    cat("  - hierarchical clustering: hclust()\n")
+    cat("  - mixture models: mixtools package\n")
+    return(NA)
+  })
 }
 
 # COMPLETENESS METRICS (placeholder)
@@ -369,15 +583,20 @@ main <- function() {
   args <- commandArgs(trailingOnly = TRUE)
   
   if (length(args) < 1) {
-    cat("Usage: Rscript assembly_stats.R <assembly1.fasta:name1> [assembly2.fasta:name2] ... [output_dir]\n")
+    cat("Usage: Rscript assembly_stats.R <assembly1.fasta:name1[:coverage1.txt]> [assembly2.fasta:name2[:coverage2.txt]] ... [output_dir]\n")
     cat("\nArguments:\n")
-    cat("  assemblyX.fasta:nameX - Path to assembly FASTA file with optional name (format: path:name or just path)\n")
-    cat("  output_dir            - Optional: Output directory (default: current directory)\n")
+    cat("  assemblyX.fasta:nameX[:coverageX.txt] - Path to assembly FASTA file with optional name and coverage file\n")
+    cat("                                          Format: path:name or path:name:coverage_file\n")
+    cat("  output_dir                            - Optional: Output directory (default: current directory)\n")
     cat("\nExamples:\n")
     cat("  # Single assembly\n")
     cat("  Rscript assembly_stats.R assembly.fasta:MyAssembly\n")
     cat("  # Multiple assemblies for comparison\n")
     cat("  Rscript assembly_stats.R original.fasta:Original improved.fasta:Improved output_dir\n")
+    cat("  # With coverage file for Issues metric\n")
+    cat("  Rscript assembly_stats.R assembly.fasta:MyAssembly:coverage.txt output_dir\n")
+    cat("  # Mixed - some with coverage, some without\n")
+    cat("  Rscript assembly_stats.R original.fasta:Original improved.fasta:Improved:coverage.txt output_dir\n")
     cat("  # Using default names\n")
     cat("  Rscript assembly_stats.R assembly1.fasta assembly2.fasta\n")
     quit(status = 1)
@@ -402,16 +621,37 @@ main <- function() {
   
   cat("Parsed arguments:\n")
   cat("  Assembly inputs:", paste(assembly_inputs, collapse = ", "), "\n")
-  cat("  Output directory:", output_dir, "\n\n")
+  cat("  Output directory:", output_dir, "\n")
+  cat("\n")
   
-  # Parse assembly files and names
+  # Parse assembly files, names, and coverage files
   assemblies <- list()
+  assembly_coverage <- list()  # Store coverage file for each assembly
+  
   for (input in assembly_inputs) {
+    assembly_file <- NULL
+    assembly_name <- NULL
+    coverage_file <- NULL
+    
     if (grepl(":", input)) {
-      # Format: path:name
+      # Format: path:name or path:name:coverage
       parts <- strsplit(input, ":")[[1]]
       assembly_file <- parts[1]
-      assembly_name <- parts[2]
+      
+      if (length(parts) >= 2) {
+        assembly_name <- parts[2]
+      } else {
+        assembly_name <- tools::file_path_sans_ext(basename(assembly_file))
+      }
+      
+      if (length(parts) >= 3) {
+        coverage_file <- parts[3]
+        # Check if coverage file exists
+        if (!file.exists(coverage_file)) {
+          cat("WARNING: Coverage file does not exist:", coverage_file, "\n")
+          coverage_file <- NULL
+        }
+      }
     } else {
       # Format: just path, derive name from filename
       assembly_file <- input
@@ -425,7 +665,13 @@ main <- function() {
     }
     
     assemblies[[assembly_name]] <- assembly_file
-    cat("Added assembly:", assembly_name, "->", assembly_file, "\n")
+    assembly_coverage[[assembly_name]] <- coverage_file
+    
+    cat("Added assembly:", assembly_name, "->", assembly_file)
+    if (!is.null(coverage_file)) {
+      cat(" (coverage:", coverage_file, ")")
+    }
+    cat("\n")
   }
   
   if (length(assemblies) == 0) {
@@ -450,7 +696,13 @@ main <- function() {
   
   for (assembly_name in names(assemblies)) {
     assembly_file <- assemblies[[assembly_name]]
-    cat("Processing assembly:", assembly_name, "(", assembly_file, ")\n")
+    coverage_file <- assembly_coverage[[assembly_name]]
+    
+    cat("Processing assembly:", assembly_name, "(", assembly_file, ")")
+    if (!is.null(coverage_file)) {
+      cat(" with coverage file:", coverage_file)
+    }
+    cat("\n")
     
     # Read assembly lengths
     lengths <- read_fasta_lengths(assembly_file)
@@ -459,8 +711,8 @@ main <- function() {
     # Store lengths for comparison
     all_lengths[[assembly_name]] <- lengths
     
-    # Calculate metrics
-    contiguity_results <- calculate_contiguity_metrics(lengths, assembly_name, output_dir)
+    # Calculate metrics (pass assembly-specific coverage file)
+    contiguity_results <- calculate_contiguity_metrics(lengths, assembly_name, output_dir, coverage_file)
     completeness_results <- calculate_completeness_metrics(lengths, assembly_name, output_dir, NULL)
     correctness_results <- calculate_correctness_metrics(lengths, assembly_name, output_dir, NULL, NULL)
     
@@ -509,12 +761,21 @@ main <- function() {
     basic_stats <- result$contiguity_results$basic_stats
     nx_data <- result$contiguity_results$nx_data
     aun_value <- result$contiguity_results$aun
+    issues_result <- result$contiguity_results$issues
+    
+    # Extract issues count for display
+    issues_count <- if (!is.null(issues_result) && !any(is.na(issues_result)) && !is.null(issues_result$total_issues)) {
+      issues_result$total_issues
+    } else {
+      "N/A"
+    }
     
     cat("ASSEMBLY:", assembly_name, "\n")
     cat("Number of contigs:", comma(basic_stats$num_contigs), "\n")
     cat("Total length:", comma(basic_stats$total_length), "bp\n")
     cat("N50:", comma(nx_data$NX[which.min(abs(nx_data$X - 50))]), "bp\n")
-    cat("auN:", comma(round(aun_value)), "bp\n\n")
+    cat("auN:", comma(round(aun_value)), "bp\n")
+    cat("Issues:", issues_count, "\n\n")
   }
   
   if (length(assemblies) > 1) {

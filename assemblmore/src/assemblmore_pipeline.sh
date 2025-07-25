@@ -44,11 +44,14 @@ PIPELINE STEPS:
   2. Create initial refined assembly based on reference mapping
   3. Map reads to refined assembly
   4. Generate final assembly with contig spanning and gap filling
-  5. Comparative assembly statistics (original vs improved)
+  5. Generate coverage data and calculate Issues metric
+  6. Comparative assembly statistics (original vs improved with Issues analysis)
 
 OUTPUT:
   The pipeline generates a comprehensive set of outputs including:
   - Improved assembly: assemblmore_final_assembly.fasta
+  - Coverage analysis: final_assembly_coverage.txt
+  - Assembly quality Issues metric with cluster identification
   - Comparative NX plots and statistics showing improvement
   - Assembly quality metrics and comparison tables
   - Length distribution comparisons
@@ -56,7 +59,7 @@ OUTPUT:
 
 DEPENDENCIES:
   Required: minimap2, samtools, paftools.js, python (with pandas, biopython, etc.)
-  Optional: R (with ggplot2, dplyr, readr, scales) for enhanced comparative statistics
+  Optional: R (with ggplot2, dplyr, readr, scales, dbscan) for enhanced statistics with Issues metric
 
 EXAMPLES:
   # Basic usage
@@ -121,7 +124,7 @@ check_dependencies() {
     
     # Check R and R packages (optional, but recommended for detailed stats)
     if command -v Rscript &> /dev/null; then
-        local r_deps=("ggplot2" "dplyr" "readr" "scales")
+        local r_deps=("ggplot2" "dplyr" "readr" "scales" "dbscan")
         local missing_r=()
         
         for dep in "${r_deps[@]}"; do
@@ -132,14 +135,14 @@ check_dependencies() {
         
         if [ ${#missing_r[@]} -ne 0 ]; then
             log "WARNING: Missing R packages for detailed assembly statistics: ${missing_r[*]}"
-            log "Install with: R -e \"install.packages(c('ggplot2', 'dplyr', 'readr', 'scales'))\""
+            log "Install with: R -e \"install.packages(c('ggplot2', 'dplyr', 'readr', 'scales', 'dbscan'))\""
             log "Will use basic statistics instead"
         else
-            log "R and required packages found - will generate detailed assembly statistics"
+            log "R and required packages found - will generate detailed assembly statistics with Issues metric"
         fi
     else
         log "WARNING: R not found - will use basic assembly statistics only"
-        log "Install R and packages for comprehensive analysis"
+        log "Install R and packages for comprehensive analysis with Issues metric"
     fi
     
     log "All required dependencies found"
@@ -449,6 +452,31 @@ main() {
         done
     fi
     
+    # Step 5: Generate coverage data for Issues metric calculation
+    FINAL_COVERAGE_BAM="${READS_BASE}_mapped_to_assemblmore_final_assembly.sorted.bam"
+    FINAL_COVERAGE_FILE="final_assembly_coverage.txt"
+    
+    if [ ! -f "$FINAL_COVERAGE_FILE" ]; then
+        log ""
+        log "Generating coverage data for Issues metric calculation..."
+        
+        # Map reads to final assembly for coverage analysis
+        run_step "Step 5a: Mapping reads to final assembly for coverage" \
+            "$SCRIPT_DIR/fill_gaps.sh" -ax "$MAP_PRESET_2" -N "$MAX_ALIGNMENTS" "$FINAL_OUTPUT" "$READS_ABS"
+        
+        # Generate coverage file using samtools depth
+        if [ -f "$FINAL_COVERAGE_BAM" ]; then
+            run_step "Step 5b: Generating coverage file" \
+                samtools depth -aa "$FINAL_COVERAGE_BAM" -o "$FINAL_COVERAGE_FILE"
+            log "✓ Coverage file generated: $FINAL_COVERAGE_FILE"
+        else
+            log "WARNING: Could not find coverage BAM file: $FINAL_COVERAGE_BAM"
+            log "Skipping coverage file generation"
+        fi
+    else
+        log "Skipping Step 5: Coverage file already exists: $FINAL_COVERAGE_FILE"
+    fi
+    
     # Cleanup intermediate files if requested
     cleanup
     
@@ -458,15 +486,28 @@ main() {
     log "  - Contig placements: $FILTERED_TSV"
     log "  - Initial refined assembly: $INITIAL_ASSEMBLY"
     log "  - Final assembly: $FINAL_OUTPUT"
+    if [ -f "$FINAL_COVERAGE_FILE" ]; then
+        log "  - Coverage data: $FINAL_COVERAGE_FILE"
+    fi
     
     # Generate comprehensive assembly statistics with comparison
     if command -v Rscript &> /dev/null; then
         log ""
         log "Generating comprehensive assembly statistics with comparison..."
         
+        # Prepare assembly inputs with coverage file if available
+        ORIGINAL_INPUT="$ASM_ABS:Original"
+        if [ -f "$FINAL_COVERAGE_FILE" ]; then
+            IMPROVED_INPUT="$(pwd)/$FINAL_OUTPUT:Improved:$(pwd)/$FINAL_COVERAGE_FILE"
+            log "Including Issues metric calculation using coverage file: $FINAL_COVERAGE_FILE"
+        else
+            IMPROVED_INPUT="$(pwd)/$FINAL_OUTPUT:Improved"
+            log "Coverage file not available - Issues metric will be skipped"
+        fi
+        
         # Run custom R script for comparative assembly analysis
         run_step "Generating comparative assembly statistics" \
-            Rscript "$SCRIPT_DIR/assembly_stats.R" "$ASM_ABS:Original" "$(pwd)/$FINAL_OUTPUT:Improved" "$(pwd)/stats"
+            Rscript "$SCRIPT_DIR/assembly_stats.R" "$ORIGINAL_INPUT" "$IMPROVED_INPUT" "$(pwd)/stats"
 
         log "Comparative assembly statistics saved in: $(pwd)/stats/"
         log "  - Individual NX plots: stats/*_nx_plot.png"
@@ -474,9 +515,14 @@ main() {
         log "  - Assembly comparison table: stats/assembly_comparison.csv"
         log "  - Length distribution comparison: stats/length_distribution_comparison.png"
         log "  - Comprehensive summary: stats/assembly_analysis_summary.txt"
+        
+        if [ -f "$FINAL_COVERAGE_FILE" ]; then
+            log "  - Issues cluster details: stats/Improved_issues_clusters_detailed.csv"
+            log "  - Issues cluster summary: stats/Improved_issues_clusters_summary.csv"
+        fi
     else
         log "Rscript not found - skipping detailed assembly statistics"
-        log "Install R and required packages (ggplot2, dplyr, readr, scales) for comprehensive analysis"
+        log "Install R and required packages (ggplot2, dplyr, readr, scales, dbscan) for comprehensive analysis"
         
         # Fallback to seqkit if available
         if command -v seqkit &> /dev/null; then
