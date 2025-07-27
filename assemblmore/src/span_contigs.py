@@ -476,7 +476,9 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
 
 
     by_contig = list(zip([item for _, item in alignments.groupby(5, sort=False)], orderings['chr']))
-
+    last_contig = by_contig[-1][0][5].values[0]
+    first_contig = by_contig[0][0][5].values[0] 
+    #print(f"first contig: {first_contig}, last contig: {last_contig}")
     # Group by contig and orderings to find pairs of alignments that are on the same chromosome
     print("[DEBUG] Merging alignments to find common reads that span the contigs...")
     merged = list(map(lambda x: pd.merge(x[0][0], x[1][0], how = 'inner', on = 0), (filter(lambda x: x[0][1] == x[1][1], mit.pairwise(by_contig)))))
@@ -485,11 +487,15 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
 
     for i, item in enumerate(merged):
         if item.empty:
-            print(f"[DEBUG] Warning: Empty alignment found between {merged[i-1]['5_y'].values[0]} and {merged[i+1]['5_x'].values[0]}. Skipping.")
-            item = (merged[i-1]['5_y'].values[0], merged[i+1]['5_x'].values[0])
+            l_contig_name = merged[i-1]['5_y'].values[0] if i > 0 else first_contig
+            r_contig_name = merged[i+1]['5_x'].values[0] if i < len(merged) - 1 else last_contig
+            print(f"[DEBUG] Warning: Empty alignment found between {l_contig_name} and {r_contig_name}. Skipping.")
+            item = (l_contig_name, r_contig_name)
+            merged[i] = item
             continue
+    
 
-    merged = [item if not item.empty else (merged[i-1]['5_y'].values[0], merged[i+1]['5_x'].values[0]) for i, item in enumerate(merged)]
+    #merged = [item if not item.empty else (merged[i-1]['5_y'].values[0], merged[i+1]['5_x'].values[0]) for i, item in enumerate(merged)]
     
     # merge alignments to find common reads that span the contigs (probably no point in import more itertools just for the pairwise function, but it is more readable this way)
     #spanning_reads = [find_best_read(item) for item in merged if not item.empty]
