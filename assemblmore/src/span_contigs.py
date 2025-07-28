@@ -84,6 +84,9 @@ def combine_contigs(arr: list, reads, contigs, extended_contigs: dict = None) ->
         Merges the contig with the telomere using the best spanning read.
         """
         print(f"[DEBUG] Running telomere_merge ({'left' if left else 'right'})...")
+        print(f"[DEBUG] str1: {str1}, series_rules: {series_rules}")
+        if str1 is None:
+            str1 = series_rules[5]
         if not isinstance(str1, str):
             rel_str = str1
         else:
@@ -98,6 +101,7 @@ def combine_contigs(arr: list, reads, contigs, extended_contigs: dict = None) ->
         telo_str = read_seqs[read_ids.index(series_rules[0])]
 
         if left:
+            #print(rel_str)
             x = series_rules[2]
             #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[:x])}, {str1}_len_{len(rel_str)}")
             return telo_str[:x] + rel_str
@@ -106,7 +110,7 @@ def combine_contigs(arr: list, reads, contigs, extended_contigs: dict = None) ->
             #print(f"[DEBUG] {series_rules[0]}_span_len {len(telo_str[y+1:])}, {str1}_len_{len(rel_str)}")
             return rel_str + telo_str[y + 1:]
 
-    
+    #print('[DEBUG] Initial array:', arr)
     i = 1
     while i < len(arr) - 2:
         #print(f"[DEBUG] Checking for inter-contig merge at position {i}...")
@@ -127,7 +131,7 @@ def combine_contigs(arr: list, reads, contigs, extended_contigs: dict = None) ->
             i += 2
     
 
-    
+    #print("[DEBUG] After inter-contig merges:", arr)
     # Handle telomere merges
     if isinstance(arr[0], pd.Series):
         #print("[DEBUG] Performing left telomere merge...")
@@ -334,7 +338,7 @@ def simple_contig_span(alignments: pd.DataFrame, orderings: pd.DataFrame, reads,
                     print("THIS IS EXTENDED CONTIGS", extended_contigs)
                     
                     # If we found a spanning read and we have a temp extended contig from this iteration, store it
-                    print(f"[DEBUG] Checking temp_extended_contig: exists={temp_extended_contig is not None}, value={temp_extended_contig}")
+                    #print(f"[DEBUG] Checking temp_extended_contig: exists={temp_extended_contig is not None}, value={temp_extended_contig}")
                     if 'temp_extended_contig' in locals() and temp_extended_contig is not None:
                         print(f"[DEBUG] Adding extended contig for {original_left_contig}")
                         extended_contigs[original_left_contig] = temp_extended_contig
