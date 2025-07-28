@@ -37,6 +37,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
     organelle_options = ['MT', 'mitochondrion', 'chloroplast', 'plastid', 'organelle']
     organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)]
     print(f"Found {len(organelle_contigs)} organelle contigs.")
+    print(f"Filtered out {len(mappings_df['contig'].unique()) - len(mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length)]['contig'].unique())} contigs by length.")
     mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P') & (mappings_df['matched_total'] >= matched_base_threshold)]
     print(f"Filtered to {len(mappings_df)} mappings after removing organelles and short contigs.")
 
@@ -223,6 +224,7 @@ threshold = read_stats['mean'] * 2
 #threshold = 56028.431716322346
 #threshold = 57070.18499123945
 #threshold = 100000
+threshold = 0
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
