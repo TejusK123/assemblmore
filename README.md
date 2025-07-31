@@ -75,10 +75,46 @@ export PATH="$HOME/path/to/assemblmore/assemblmore/src:$PATH"
 ### Basic Usage
 
 ```bash
-
 # Run the pipeline
-<path>/assemblmore reference.fasta assembly.fasta reads.fastq
+assemblmore reference.fasta assembly.fasta reads.fastq
 ```
+
+**New to AssemblMore?** Try our complete example first:
+```bash
+cd assemblmore/examples && ./run_example.sh
+```
+
+## Example Dataset
+
+We provide a complete example dataset to test AssemblMore and demonstrate its capabilities:
+
+### C. briggsae AF16 Example
+
+```bash
+# Navigate to examples directory
+cd assemblmore/examples
+
+# Install gdown for dataset download
+pip install gdown
+
+# Run the complete example
+chmod +x run_example.sh
+./run_example.sh
+```
+
+**Dataset details**:
+- **Organism**: *Caenorhabditis briggsae* AF16 strain
+- **Sequencing**: MinION r10.4 Nanopore (Rog Lab)
+- **Reference**: C. briggsae QX1410 (PRJNA784955, WBPS19)
+- **Assembly**: Flye-generated initial assembly
+
+The example demonstrates typical improvements:
+- Improved N50 and contiguity
+- Corrected contig orientation
+- Gap filling with spanning reads
+- Comprehensive quality assessment
+
+See `assemblmore/examples/README.md` for detailed documentation, troubleshooting, and adding custom examples.
 
 ## Installation
 
@@ -269,6 +305,21 @@ The pipeline generates numerous output files in the specified output directory:
 
 ## Advanced Features
 
+### Working with Examples
+
+Explore AssemblMore capabilities using our provided datasets:
+
+```bash
+cd assemblmore/examples
+./run_example.sh  # C. briggsae AF16 example
+```
+
+The examples demonstrate advanced features like:
+- Reference-guided assembly improvement
+- Telomere extension with long reads
+- Comprehensive quality assessment
+- Issues metric calculation with coverage analysis
+
 ### Comparative Analysis
 
 The pipeline automatically compares original and improved assemblies:
@@ -380,4 +431,5 @@ GitHub: https://github.com/TejusK123/assemblmore
 
 - **Issues:** Report bugs and request features on [GitHub Issues](https://github.com/TejusK123/assemblmore/issues)
 - **Documentation:** Check the `src/README.md` for detailed technical documentation
-- **Examples:** See `example_comparative_analysis.md` for usage examples
+- **Examples:** See `assemblmore/examples/README.md` for complete example datasets and tutorials
+- **Quick Start:** Run `assemblmore/examples/run_example.sh` for a hands-on demonstration

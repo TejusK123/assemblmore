@@ -2,3 +2,24 @@
 ._.DS_Store
 **/.DS_Store
 **/._.DS_Store
+
+# Example datasets - exclude downloaded sequence files
+assemblmore/examples/**/*.fasta
+assemblmore/examples/**/*.fa
+assemblmore/examples/**/*.fna
+assemblmore/examples/**/*.fastq
+assemblmore/examples/**/*.fq
+assemblmore/examples/**/*.fasta.gz
+assemblmore/examples/**/*.fa.gz
+assemblmore/examples/**/*.fna.gz
+assemblmore/examples/**/*.fastq.gz
+assemblmore/examples/**/*.fq.gz
+
+# Example output directories
+assemblmore/examples/**/assemblmore_output*/
+assemblmore/examples/**/assemblmore_output_*/
+
+# Temporary files from examples
+assemblmore/examples/**/temp_contigs/
+assemblmore/examples/**/*.tmp
+assemblmore/examples/**/*.temp
