@@ -16,6 +16,7 @@ EXPECTED_TELOMERE_LENGTH=8000
 LENGTH_THRESHOLD=0
 PHRED_THRESHOLD=20
 SKIP_BAM=false
+DISABLE_TELOMERE_EXTENSION=false
 
 usage() {
     cat << EOF
@@ -32,6 +33,7 @@ OPTIONAL ARGUMENTS:
   --length_threshold N            Minimum contig length threshold (default: 0)
   --output_dir DIR                Output directory (default: assemblmore_output)
   --skip_bam                      Skip BAM file generation (only generate PAF files)
+  --disable_telomere_extension    Disable telomere extension (useful for bacterial genomes)
   --help                          Show this help message
 
 DESCRIPTION:
@@ -70,6 +72,9 @@ EXAMPLES:
 
   # Skip BAM generation for faster processing
   $0 reference.fasta assembly.fasta reads.fastq --skip_bam
+
+  # For bacterial genomes (disable telomere extension)
+  $0 reference.fasta assembly.fasta reads.fastq --disable_telomere_extension
 
   # Specify output directory
   $0 reference.fasta assembly.fasta reads.fastq --output_dir my_results
@@ -275,6 +280,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_BAM=true
             shift
             ;;
+        --disable-telomere-extension|--disable_telomere_extension)
+            DISABLE_TELOMERE_EXTENSION=true
+            shift
+            ;;
         -v|--verbose)
             VERBOSE=true
             shift
@@ -359,6 +368,7 @@ main() {
     log_verbose "Assembly base name: $ASM_BASE"
     log_verbose "Reads base name: $READS_BASE"
     log_verbose "Skip BAM generation: $SKIP_BAM"
+    log_verbose "Disable telomere extension: $DISABLE_TELOMERE_EXTENSION"
     #log_verbose "PAF file: $STEP1_PAF"
     #log_verbose "Actual reference base (from PAF): $ACTUAL_REF_BASE"
     log_verbose "Expected telomere length: $EXPECTED_TELOMERE_LENGTH"
@@ -433,8 +443,14 @@ main() {
     fi
     
     # Step 4: Generate final assembly
+    SPAN_CONTIGS_ARGS=("$STEP3_PAF" "$FILTERED_TSV" "$INITIAL_ASSEMBLY" "$READS_ABS" --expected_telomere_length "$EXPECTED_TELOMERE_LENGTH" --length_threshold "$LENGTH_THRESHOLD" --phred_threshold "$PHRED_THRESHOLD")
+    
+    if [ "$DISABLE_TELOMERE_EXTENSION" = true ]; then
+        SPAN_CONTIGS_ARGS+=(--disable_telomere_extension)
+    fi
+    
     run_step "Step 4: Generating final assembly" \
-        "$SCRIPT_DIR/span_contigs.sh" "$STEP3_PAF" "$FILTERED_TSV" "$INITIAL_ASSEMBLY" "$READS_ABS" --expected_telomere_length "$EXPECTED_TELOMERE_LENGTH" --length_threshold "$LENGTH_THRESHOLD" --phred_threshold "$PHRED_THRESHOLD"
+        "$SCRIPT_DIR/span_contigs.sh" "${SPAN_CONTIGS_ARGS[@]}"
     
     # Rename final output to something more descriptive
     FINAL_OUTPUT="assemblmore_final_assembly.fasta"

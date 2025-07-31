@@ -554,7 +554,8 @@ def generate_descriptions(contigs: List[str], reads, contigos, extended_contigs:
 @click.option('--length_threshold', default=0, help='Minimum length of reads to consider (default: 0)')
 @click.option('--phred_threshold', default=20, help='Minimum Phred quality score of reads to consider (default: equivalent to 1/100 chance of mapping misplacement <20 for telomere extension, 10 for spanning reads>)')
 @click.option('--disable_extension', is_flag=True, help='Disable computationally expensive contig extension iterations (default: extension enabled)')
-def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, expected_telomere_length, length_threshold, phred_threshold, disable_extension) -> dict:
+@click.option('--disable_telomere_extension', is_flag=True, help='Disable telomere extension (default: telomere extension enabled)')
+def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, expected_telomere_length, length_threshold, phred_threshold, disable_extension, disable_telomere_extension) -> dict:
 
 
     click.echo(f"[DEBUG] Starting merge_contigs with parameters:\n")
@@ -566,6 +567,7 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     click.echo(f"length_threshold: {length_threshold}")
     click.echo(f"phred_threshold: {phred_threshold}")
     click.echo(f"extension_enabled: {not disable_extension}")
+    click.echo(f"telomere_extension_enabled: {not disable_telomere_extension}")
 
     print("[DEBUG] Reading input files...")
     alignments = pd.read_csv(alignments_file, delimiter='\t', header=None)
@@ -580,11 +582,15 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     contigs_to_chr = {contig: chr for chr, contigs in groupings for contig in contigs['contig'].to_list()}
 
     print("[DEBUG] Running telomere_extension in merge_contigs...")
-    both, left, right = telomere_extension(alignments, orderings, 
-                                           expected_telomere_length=expected_telomere_length, 
-                                           length_threshold=length_threshold, 
-                                           phred_threshold=phred_threshold)
-    
+    if not disable_telomere_extension:
+        both, left, right = telomere_extension(alignments, orderings, 
+                                               expected_telomere_length=expected_telomere_length, 
+                                               length_threshold=length_threshold, 
+                                               phred_threshold=phred_threshold)
+    else:
+        print("[DEBUG] Telomere extension disabled - initializing empty extension lists")
+        both, left, right = [], [], []
+
     print("[DEBUG] Running simple_contig_span in merge_contigs...")
     spanning_reads, extended_contigs = simple_contig_span(alignments, orderings, reads, contigs, reads_file=reads_file,
                                         length_threshold=length_threshold, 
@@ -595,18 +601,23 @@ def merge_contigs(alignments_file, orderings_file, contigs_file, reads_file, exp
     
     final_hash = deepcopy(chr_to_contigs)
     print("[DEBUG] Inserting left, right, and both telomere extensions into final_hash...")
-    for item in left:
-        chr = contigs_to_chr[item[0]]
-        final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
+    if not disable_telomere_extension:
+        for item in left:
+            chr = contigs_to_chr[item[0]]
+            final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
 
-    for item in right:
-        chr = contigs_to_chr[item[0]]
-        final_hash[chr].append(item[1]) if item[1] is not None else final_hash[chr].append(None)
+        for item in right:
+            chr = contigs_to_chr[item[0]]
+            final_hash[chr].append(item[1]) if item[1] is not None else final_hash[chr].append(None)
 
-    for item in both:
-        chr = contigs_to_chr[item[0]]
-        final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
-        final_hash[chr].append(item[2]) if item[2] is not None else final_hash[chr].append(None)
+        for item in both:
+            chr = contigs_to_chr[item[0]]
+            final_hash[chr].insert(0, item[1]) if item[1] is not None else final_hash[chr].insert(0, None)
+            final_hash[chr].append(item[2]) if item[2] is not None else final_hash[chr].append(None)
+        
+    else:
+        for chr, _ in final_hash.items():
+            final_hash[chr] = [None] + final_hash[chr] + [None]
 
     def get_index(item, query):
         """
