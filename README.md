@@ -365,7 +365,7 @@ When adding /src/ to path, make sure to NOT use ~/ shell expansion. Use the $HOM
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the GNU GENERAL PUBLIC LICENSE Version 3 - see the LICENSE file for details.
 
 ## Citation
 
