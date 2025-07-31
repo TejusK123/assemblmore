@@ -1,5 +1,5 @@
 # AssemblMore
-A comprehensive genome assembly improvement pipeline that automatically merges and refines contigs from next-generation assemblers (Flye, Canu, etc.) using reference-guided approaches and ultra-long reads.
+A comprehensive genome assembly refinement pipeline that automatically merges and refines contigs from next-generation assemblers (Flye, Canu, etc.) using reference-guided approaches and ultra-long reads.
 
 ![GitHub](https://img.shields.io/github/license/TejusK123/assemblmore)
 ![GitHub last commit](https://img.shields.io/github/last-commit/TejusK123/assemblmore)
