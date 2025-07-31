@@ -100,6 +100,30 @@ cd assemblmore/src
 ./install_dependencies.sh
 ```
 
+### Important: paftools.js Setup
+
+After installing minimap2, you need to add `paftools.js` to your PATH. This script is typically located in the `misc` folder of your minimap2 installation:
+
+```bash
+# Find your minimap2 installation location
+which minimap2
+
+# Add paftools.js to PATH (add to your ~/.bashrc or ~/.zshrc)
+export PATH="/path/to/minimap2/misc:$PATH"
+
+# Example locations:
+# Conda: export PATH="$CONDA_PREFIX/bin/misc:$PATH"
+# Homebrew: export PATH="/opt/homebrew/bin/misc:$PATH" or "/usr/local/bin/misc:$PATH"
+# Manual install: export PATH="/usr/local/minimap2/misc:$PATH"
+```
+
+To verify paftools.js is accessible:
+```bash
+which paftools.js
+# or
+paftools.js --help
+```
+
 ## Usage
 
 ### Command Line Interface
