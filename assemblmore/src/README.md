@@ -1,21 +1,42 @@
 # AssemblMore - Genome Assembly Improvement Pipeline
 
-AssemblMore is a comprehensive pipeline#### Keep intermediate files for debugging:
-```bash
-./assemblmore_pipeline.sh -k -v reference.fasta assembly.fasta reads.fasta
-```
+AssemblMore is a comprehensive pipeline designed to improve genome assemblies created by next-generation assemblers like Flye and Canu. It uses reference-guided approaches and long-read data to enhance contig placement, orientation, and gap filling.
 
-#### Arguments can be in any order:
-```bash
-# Options before positional arguments
-./assemblmore_pipeline.sh -t 10000 -v reference.fasta assembly.fasta reads.fasta
+## Pipeline Scripts and Components
 
-# Options after positional arguments  
-./assemblmore_pipeline.sh reference.fasta assembly.fasta reads.fasta -t 10000 -v
+The AssemblMore pipeline consists of several interconnected scripts, each with a specific role in the assembly improvement process. The main orchestrator coordinates the execution of these individual components. Each component can be run individually.
 
-# Mixed order
-./assemblmore_pipeline.sh -t 10000 reference.fasta -v assembly.fasta reads.fasta -q 30
-```igned to improve genome assemblies created by next-generation assemblers like Flye and Canu. It uses reference-guided approaches and long-read data to enhance contig placement, orientation, and gap filling.
+### Core Pipeline Scripts
+
+- **`assemblmore_pipeline.sh`** - Main orchestrator script that manages the entire workflow, coordinates execution of all pipeline steps with error handling, and provides verbose logging
+
+- **`fill_gaps.sh`** - Wrapper for minimap2 sequence alignment that handles mapping between sequences, generates PAF alignment files and optionally BAM files, and manages output directories
+
+- **`initial_assembly.sh`** - Creates initial refined assembly by coordinating contig placement analysis and reorienting contigs based on mapping results
+
+- **`contig_placements.py`** - Analyzes PAF mappings to determine optimal contig placement, filters contigs based on mapping quality, and resolves contig orientations using network analysis
+
+- **`span_contigs.sh`** - Simple bash wrapper that calls the Python gap filling implementation
+
+- **`span_contigs.py`** - Core gap filling and assembly finalization script that performs sophisticated gap filling between contigs, implements telomere extension, and generates the final improved assembly
+
+- **`assembly_stats.R`** - Comprehensive assembly quality analysis that calculates contiguity metrics, generates comparative plots, and implements quality assessment using clustering algorithms
+
+### Utility and Supporting Scripts
+
+- **`kmer_completeness.sh`** - K-mer based completeness analysis using Meryl and Merqury to provide quality metrics independent of reference genome
+
+- **`install_dependencies.sh`** - Automated dependency installation for required bioinformatics tools, Python packages, and R libraries
+
+- **`test_pipeline.sh`** - End-to-end pipeline testing script
+
+- **`test_arguments.sh`** - Argument parsing validation
+
+- **`test_argument_order.sh`** - Tests flexible argument ordering
+
+### Pipeline Execution Flow
+
+The pipeline follows this sequence: input validation → reference mapping → contig placement analysis → initial assembly creation → read mapping → gap filling → quality assessment and comparison
 
 ## Overview
 
@@ -108,7 +129,89 @@ pip install numpy pandas biopython networkx more_itertools click
 
 #### Keep intermediate files for debugging:
 ```bash
-./assemblmore_pipeline.sh -k -v reference.fasta my_assembly.fasta reads.fasta
+./assemblmore_pipeline.sh -k -v reference.fasta assembly.fasta reads.fasta
+```
+
+#### Arguments can be in any order:
+```bash
+# Options before positional arguments
+./assemblmore_pipeline.sh -t 10000 -v reference.fasta assembly.fasta reads.fasta
+
+# Options after positional arguments  
+./assemblmore_pipeline.sh reference.fasta assembly.fasta reads.fasta -t 10000 -v
+
+# Mixed order
+./assemblmore_pipeline.sh -t 10000 reference.fasta -v assembly.fasta reads.fasta -q 30
+```
+
+### Running Individual Pipeline Components
+
+For advanced users who need to run specific pipeline steps or customize the workflow:
+
+#### Manual Step-by-Step Execution
+
+```bash
+# Step 1: Map assembly to reference
+./fill_gaps.sh -ax asm20 reference.fasta assembly.fasta
+
+# Step 2: Analyze contig placements and create initial assembly
+./initial_assembly.sh assembly_to_reference.paf reads.fastq assembly.fasta
+
+# Step 3: Map reads to refined assembly
+./fill_gaps.sh -ax map-ont refined_assembly.fasta reads.fastq
+
+# Step 4: Generate final assembly with gap filling
+./span_contigs.sh read_alignments.paf contig_placements.tsv \
+    refined_assembly.fasta reads.fastq \
+    --expected_telomere_length 8000 --phred_threshold 20
+
+# Step 5: Generate assembly statistics and comparisons
+Rscript assembly_stats.R original_assembly.fasta final_assembly.fasta \
+    --output-dir results/ --coverage-file coverage.txt
+```
+
+#### Individual Script Usage
+
+**fill_gaps.sh** - Minimap2 wrapper with PAF output:
+```bash
+# Basic alignment
+./fill_gaps.sh -ax asm20 reference.fasta query.fasta
+
+# Skip BAM generation for speed
+./fill_gaps.sh --no-bam -ax map-ont assembly.fasta reads.fastq
+
+# Custom output directory
+./fill_gaps.sh -o custom_output/ -ax asm20 ref.fasta assembly.fasta
+```
+
+**contig_placements.py** - Contig placement analysis:
+```bash
+# Basic usage
+python contig_placements.py mappings.paf reads.fastq
+
+# The script automatically generates placement TSV files
+```
+
+**span_contigs.py** - Gap filling and assembly finalization:
+```bash
+# Full parameter specification
+python span_contigs.py alignments.paf placements.tsv assembly.fasta reads.fastq \
+    --expected_telomere_length 10000 \
+    --phred_threshold 25 \
+    --length_threshold 1000 \
+    --disable_telomere_extension  # For bacterial genomes
+
+# Basic usage with defaults
+python span_contigs.py alignments.paf placements.tsv assembly.fasta reads.fastq
+```
+
+**kmer_completeness.sh** - K-mer based quality assessment:
+```bash
+# Basic k-mer analysis
+./kmer_completeness.sh reads.fastq assembly.fasta
+
+# Custom k-mer size and output
+./kmer_completeness.sh reads.fastq assembly.fasta --kmer-size 21 --output-dir kmer_results/
 ```
 
 ## Pipeline Steps in Detail

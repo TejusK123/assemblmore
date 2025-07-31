@@ -14,7 +14,7 @@ This directory contains example datasets and scripts to demonstrate the AssemblM
 This example demonstrates AssemblMore's ability to improve genome assemblies using:
 - **Reference genome**: C. briggsae QX1410 reference (PRJNA784955, WBPS19)
 - **Initial assembly**: Flye assembly of AF16 strain long reads
-- **Raw reads**: MinION r10.4 Nanopore sequencing data
+- **Raw reads**: MinION r10.4.1 Dorado-basecalled Nanopore sequencing data
 
 ## Quick Start
 

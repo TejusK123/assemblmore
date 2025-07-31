@@ -22,7 +22,7 @@ def get_readlength_stats(reads_file):
     return stats
 
 
-def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phred_threshold=40, overlap_fraction=0.25, matched_base_threshold=15000):
+def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=0, phred_threshold=40, overlap_fraction=0.25, matched_base_threshold=15000):
     print(f"Loading mapped contigs from: {mapped_contigs_path}")
     print(f"Minimum contig length: {min_contig_length}, Phred threshold: {phred_threshold}")
 
@@ -34,6 +34,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
     )
     print(f"Loaded {len(mappings_df)} mappings.")
 
+    ## Filter out organelle contigs and short contigs (default min_contig_length threshold is 0 as most times the overlap graph will take care of that)
     organelle_options = ['MT', 'mitochondrion', 'chloroplast', 'plastid', 'organelle']
     organelle_contigs = mappings_df[mappings_df['chr'].isin(organelle_options)]
     print(f"Found {len(organelle_contigs)} organelle contigs.")
@@ -41,6 +42,8 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
     mappings_df = mappings_df[(~mappings_df['chr'].isin(organelle_options)) & (mappings_df['contig_length'] > min_contig_length) & (mappings_df['sup_0'] == 'tp:A:P') & (mappings_df['matched_total'] >= matched_base_threshold)]
     print(f"Filtered to {len(mappings_df)} mappings after removing organelles and short contigs.")
 
+
+    #Build a dictionary to map contigs to chromosomes based on matched totals
     #########################################
     prom_map = {item : {chr : 0 for chr in mappings_df['chr'].unique()} for item in mappings_df['contig'].unique()}
     for key, value in prom_map.items():
@@ -53,7 +56,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
                                     if value == max(prom_map[item].values()))) for item in prom_map.keys()], 
                                     key = lambda x: x[1]), columns=['contig', 'chr'])
     print(f"Assigned {len(contig_to_chr)} contigs to chromosomes.")
-    ######################################### This really needs to be improved ^ 
+    ######################################### This really needs to be improved ^ choosing max not very robust, but works for now.
 
  
 
@@ -89,6 +92,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
             # are insanely far away from the most contiguous mapping.
             # This allows for frame-shift stuff that might've happened with minimap.
         ################################
+
 
         ############# Calculate strand mode using a weighted approach
         if not poi_df.empty:
@@ -138,7 +142,7 @@ def filter_and_orient_contigs(mapped_contigs_path, min_contig_length=100000, phr
                    max_matched=item['max_matched'])
     
 
-    #Maybe more fine grained overlap calculation base off individual mappings.
+    #Maybe more fine grained overlap calculation base off individual mappings in the future but for now this should be enough.
     print("Building overlap graph...")
     for i, item in contig_to_chr.iterrows():
         for j, other_item in contig_to_chr.iterrows():
@@ -219,12 +223,12 @@ if len(sys.argv) < 3:
     sys.exit(1)
 
 print("Starting contig placement filtering...")
-read_stats = get_readlength_stats(sys.argv[2])
-threshold = read_stats['mean'] * 2
-#threshold = 56028.431716322346
-#threshold = 57070.18499123945
-#threshold = 100000
+
+
+#read_stats = get_readlength_stats(sys.argv[2])
+#threshold = read_stats['mean'] * 2
 threshold = 0
+#Found that you dont really need to filter contigs by read length since the overlap graph will take care of that.
 print(f"Using min_contig_length threshold: {threshold}")
 filtered_data = filter_and_orient_contigs(sys.argv[1], min_contig_length=threshold)
 
