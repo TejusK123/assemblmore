@@ -56,7 +56,17 @@ chmod +x install_dependencies.sh
 ./install_dependencies.sh
 ```
 
-3. **Add to PATH (optional):**
+3. **Install paftools.js (Required):**
+```bash
+# Clone minimap2 repository to get paftools.js
+git clone https://github.com/lh3/minimap2.git
+# Add paftools.js to your PATH
+export PATH="$(pwd)/minimap2/misc:$PATH"
+# Make permanent by adding to ~/.bashrc or ~/.zshrc
+echo 'export PATH="'$(pwd)'/minimap2/misc:$PATH"' >> ~/.bashrc  # or ~/.zshrc
+```
+
+4. **Add to PATH (optional):**
 ```bash
 # Add to your ~/.bashrc or ~/.zshrc
 export PATH="$HOME/path/to/assemblmore/assemblmore/src:$PATH"
@@ -102,26 +112,40 @@ cd assemblmore/src
 
 ### Important: paftools.js Setup
 
-After installing minimap2, you need to add `paftools.js` to your PATH. This script is typically located in the `misc` folder of your minimap2 installation:
+**paftools.js is a critical dependency** that is not included in binary distributions of minimap2 from package managers (conda, brew, apt, etc.). You must install it separately:
 
 ```bash
-# Find your minimap2 installation location
-which minimap2
+# Clone the minimap2 repository to get paftools.js
+git clone https://github.com/lh3/minimap2.git
 
-# Add paftools.js to PATH (add to your ~/.bashrc or ~/.zshrc)
-export PATH="/path/to/minimap2/misc:$PATH"
+# Add the misc directory to your PATH
+export PATH="$(pwd)/minimap2/misc:$PATH"
 
-# Example locations:
-# Conda: export PATH="$CONDA_PREFIX/bin/misc:$PATH"
-# Homebrew: export PATH="/opt/homebrew/bin/misc:$PATH" or "/usr/local/bin/misc:$PATH"
-# Manual install: export PATH="/usr/local/minimap2/misc:$PATH"
+# Make the PATH change permanent (choose your shell)
+echo 'export PATH="'$(pwd)'/minimap2/misc:$PATH"' >> ~/.bashrc    # For bash
+echo 'export PATH="'$(pwd)'/minimap2/misc:$PATH"' >> ~/.zshrc     # For zsh
 ```
 
-To verify paftools.js is accessible:
+**Why this is necessary:**
+- Package managers (conda, brew, apt) only install the minimap2 binary
+- paftools.js and other utility scripts are **not included** in these distributions
+- The pipeline requires paftools.js for PAF format conversion
+- Manual installation from source includes these scripts in the `misc/` directory
+
+**Verification:**
 ```bash
+# Restart your terminal or source your shell config
+source ~/.bashrc  # or source ~/.zshrc
+
+# Verify paftools.js is accessible
 which paftools.js
-# or
 paftools.js --help
+```
+
+**Alternative locations** (if you already have minimap2 source):
+```bash
+# If you previously compiled minimap2 from source
+export PATH="/path/to/your/minimap2/misc:$PATH"
 ```
 
 ## Usage
@@ -129,7 +153,11 @@ paftools.js --help
 ### Command Line Interface
 
 ```bash
+# If running from the src directory:
 ./assemblmore_pipeline.sh <reference_genome.fasta> <assembly.fasta> <reads.fastq> [OPTIONS]
+
+# If you added src to PATH (recommended):
+assemblmore <reference_genome.fasta> <assembly.fasta> <reads.fastq> [OPTIONS]
 ```
 
 ### Required Arguments
@@ -151,12 +179,23 @@ paftools.js --help
 
 #### Basic assembly improvement:
 ```bash
+# From src directory:
 ./assemblmore_pipeline.sh reference.fasta assembly.fasta reads.fastq
+
+# If added to PATH:
+assemblmore reference.fasta assembly.fasta reads.fastq
 ```
 
 #### With custom parameters:
 ```bash
+# From src directory:
 ./assemblmore_pipeline.sh reference.fasta assembly.fasta reads.fastq \
+    --expected_telomere_length 10000 \
+    --phred_threshold 25 \
+    --output_dir my_results
+
+# If added to PATH:
+assemblmore reference.fasta assembly.fasta reads.fastq \
     --expected_telomere_length 10000 \
     --phred_threshold 25 \
     --output_dir my_results
@@ -164,12 +203,20 @@ paftools.js --help
 
 #### Fast processing (skip BAM generation):
 ```bash
+# From src directory:
 ./assemblmore_pipeline.sh reference.fasta assembly.fasta reads.fastq --skip_bam
+
+# If added to PATH:
+assemblmore reference.fasta assembly.fasta reads.fastq --skip_bam
 ```
 
 #### Arguments in any order:
 ```bash
+# From src directory:
 ./assemblmore_pipeline.sh --output_dir results reference.fasta --phred_threshold 30 assembly.fasta reads.fastq
+
+# If added to PATH:
+assemblmore --output_dir results reference.fasta --phred_threshold 30 assembly.fasta reads.fastq
 ```
 
 ## Pipeline Steps
