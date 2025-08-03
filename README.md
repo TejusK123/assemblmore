@@ -58,6 +58,7 @@ chmod +x install_dependencies.sh
 3. **Install paftools.js (Required):**
 ```bash
 # Clone minimap2 repository to get paftools.js
+cd - 
 git clone https://github.com/lh3/minimap2.git
 # Add paftools.js to your PATH
 export PATH="$(pwd)/minimap2/misc:$PATH"
