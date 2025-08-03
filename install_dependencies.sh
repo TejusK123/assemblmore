@@ -22,7 +22,7 @@ if command_exists conda; then
     echo "Installing optional R packages for enhanced statistics..."
     if command_exists R; then
         R -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager')"
-        R -e "install.packages(c('ggplot2', 'dplyr', 'readr', 'scales', 'dbscan'), dependencies = TRUE)"
+        R -e "install.packages(c('ggplot2', 'dplyr', 'readr', 'scales', 'dbscan'))"
     else
         echo "R not found - skipping R package installation"
     fi
