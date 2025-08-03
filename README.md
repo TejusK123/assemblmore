@@ -51,7 +51,6 @@ cd assemblmore
 
 2. **Install dependencies:**
 ```bash
-cd assemblmore/src
 chmod +x install_dependencies.sh
 ./install_dependencies.sh
 ```
@@ -142,7 +141,7 @@ install.packages(c("ggplot2", "dplyr", "readr", "scales", "dbscan"))
 
 Use the provided script to install all dependencies:
 ```bash
-cd assemblmore/src
+cd assemblmore
 ./install_dependencies.sh
 ```
 
