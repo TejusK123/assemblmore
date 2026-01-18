@@ -26,7 +26,7 @@ while [ "$round" -le "$MAX_ROUNDS" ]; do
     mkdir -p "$outdir"
     echo "[polishTR] Round $round: running medaka_consensus (draft=$current_input)"
 
-    medaka_consensus -i "$READS" -d "$current_input" -o "$outdir" -q || { echo "medaka_consensus failed on round $round" >&2; exit 1; }
+    medaka_consensus -i "$READS" -d "$current_input" -o "$outdir" || { echo "medaka_consensus failed on round $round" >&2; exit 1; }
 
     # find consensus fasta in output dir
     if [ -f "$outdir/consensus.fasta" ]; then
